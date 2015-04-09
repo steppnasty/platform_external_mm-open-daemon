@@ -381,7 +381,6 @@ static int mm_daemon_proc_ctrl_cmd(mm_daemon_obj_t *mm_obj,
         }
         case CAMERA_GET_CAPABILITIES: { /* 71 */
             cam_prop_t properties;
-                    priv_ctrl_cmd->length);
             length = sizeof(struct msm_ctrl_cmd) + sizeof(properties);
             memset(&properties, 0, sizeof(properties));
             mm_daemon_set_properties(&properties);
