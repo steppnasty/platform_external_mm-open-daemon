@@ -1,5 +1,5 @@
 /*
-   Copyright (C) 2014-2015 Brian Stepp 
+   Copyright (C) 2014-2016 Brian Stepp 
       steppnasty@gmail.com
 
    This program is free software; you can redistribute it and/or
@@ -23,42 +23,73 @@
 #define LOG_TAG "mm-daemon"
 
 #include <sys/types.h>
-#include <media/msm_camera.h>
-#include <media/msm_isp.h>
-#include <linux/media.h>
-
 #include <cutils/properties.h>
-
 #include "mm_daemon.h"
 
-#define SET_PARM_BIT32(parm, parm_arr) \
-    (parm_arr[parm/32] |= (1<<(parm%32)))
+static char subdev_name[32];
+static pthread_mutex_t sd_lock;
 
-static const char *mm_daemon_server_find_subdev(mm_daemon_obj_t *mm_obj,
-        enum msm_cam_subdev_type sd_type)
+static uint32_t msm_events[] = {
+    MSM_CAMERA_NEW_SESSION,
+    MSM_CAMERA_DEL_SESSION,
+    MSM_CAMERA_SET_PARM,
+    MSM_CAMERA_GET_PARM,
+    MSM_CAMERA_MSM_NOTIFY,
+};
+
+static void mm_daemon_pack_event(mm_daemon_obj_t *mm_obj, struct v4l2_event *event,
+        unsigned int command, uint32_t evt_id, int stream_id, unsigned int status)
+{
+    struct msm_v4l2_event_data *msm_evt;
+
+    msm_evt = (struct msm_v4l2_event_data *)&event->u.data;
+    msm_evt->session_id = mm_obj->session_id;
+    msm_evt->stream_id = stream_id;
+    msm_evt->command = command;
+    msm_evt->status = status;
+    event->type = MSM_CAMERA_V4L2_EVENT_TYPE;
+    event->id = evt_id;
+}
+
+static void mm_daemon_server_config_cmd(mm_daemon_obj_t *mm_obj, uint8_t cmd,
+        unsigned int stream_id)
+{
+    int len;
+    mm_daemon_pipe_evt_t pipe_cmd;
+
+    memset(&pipe_cmd, 0, sizeof(pipe_cmd));
+    pipe_cmd.cmd = cmd;
+    pipe_cmd.val = stream_id;
+    len = write(mm_obj->cfg_pfds[1], &pipe_cmd, sizeof(pipe_cmd));
+    if (len < 1)
+        ALOGI("%s: write error", __FUNCTION__);
+}
+
+char *mm_daemon_server_find_subdev(char *dev_name,
+        uint32_t group_id, uint32_t sd_type)
 {
     int dev_fd = 0;
     int media_dev_num = 0;
-    char subdev_name[32];
     struct media_device_info dev_info;
 
+    pthread_mutex_lock(&sd_lock);
     while (1) {
         char media_dev_name[32];
         snprintf(media_dev_name, sizeof(media_dev_name), "/dev/media%d",
                 media_dev_num);
         dev_fd = open(media_dev_name, O_RDWR | O_NONBLOCK);
-        if (dev_fd < 0) {
-            ALOGI("%s: Media subdevice query done", __FUNCTION__);
+        if (dev_fd < 0)
             break;
-        }
         media_dev_num++;
+        memset(&dev_info, 0, sizeof(dev_info));
         if (ioctl(dev_fd, MEDIA_IOC_DEVICE_INFO, &dev_info) < 0) {
             ALOGE("Error: Media dev info ioctl failed: %s", strerror(errno));
             break;
         }
 
-        if (strncmp(dev_info.model, QCAMERA_SERVER_NAME, sizeof(dev_info.model) != 0)) {
+        if (strncmp(dev_info.model, dev_name, sizeof(dev_info.model)) != 0) {
             close(dev_fd);
+            dev_fd = 0;
             continue;
         }
 
@@ -67,508 +98,262 @@ static const char *mm_daemon_server_find_subdev(mm_daemon_obj_t *mm_obj,
             struct media_entity_desc entity;
             memset(&entity, 0, sizeof(entity));
             entity.id = num_entities++;
-            if (ioctl(dev_fd, MEDIA_IOC_ENUM_ENTITIES, &entity) < 0) {
-                ALOGI("Done enumerating media entities");
+            if (ioctl(dev_fd, MEDIA_IOC_ENUM_ENTITIES, &entity) < 0)
+                break;
+            if (entity.group_id != group_id)
+                continue;
+            if (entity.type == sd_type && entity.group_id == group_id) {
+                snprintf(subdev_name, sizeof(subdev_name), "/dev/%s", entity.name);
                 break;
             }
-            if (entity.type == MEDIA_ENT_T_V4L2_SUBDEV && entity.group_id == sd_type) {
-                snprintf(subdev_name, sizeof(subdev_name), "/dev/v4l-subdev%d", entity.revision);
-                mm_obj->sd_revision[sd_type] = entity.revision;
-            }
         }
+        break;
     }
     if (dev_fd > 0)
         close(dev_fd);
+    dev_fd = 0;
+    pthread_mutex_unlock(&sd_lock);
     return subdev_name;
 }
 
-static void mm_daemon_vfe_close(mm_daemon_obj_t *mm_obj)
+static void mm_daemon_parm(mm_daemon_obj_t *mm_obj)
 {
-    struct msm_vfe_cfg_cmd cfgcmd;
-    struct msm_isp_cmd vfecmd;
+    int next = 1;
+    int current, position;
+    parm_buffer_t *p_table;
 
-    memset(&cfgcmd, 0, sizeof(cfgcmd));
-    memset(&vfecmd, 0, sizeof(vfecmd));
-    vfecmd.id = VFE_CMD_STOP;
-    vfecmd.length = 0;
-    vfecmd.value = NULL;
-    cfgcmd.cmd_type = CMD_GENERAL;
-    cfgcmd.length = sizeof(vfecmd);
-    cfgcmd.value = (void *)&vfecmd;
-    ioctl(mm_obj->cfg_fd, MSM_CAM_IOCTL_CONFIG_VFE, &cfgcmd);   
-}
-
-static int mm_daemon_ctrl_cmd_done(mm_daemon_obj_t *mm_obj,
-        struct msm_ctrl_cmd *ctrl_cmd, int length, void *value)
-{
-    struct msm_ctrl_cmd new_ctrl_cmd;
-    struct msm_camera_v4l2_ioctl_t ioctl_ptr;
-    uint8_t *ctrl_data = NULL;
-    int rc = 0;
-    int value_len = length - sizeof(struct msm_ctrl_cmd);
-
-    memset(&new_ctrl_cmd, 0, sizeof(new_ctrl_cmd));
-    memset(&ioctl_ptr, 0, sizeof(ioctl_ptr));
-
-    ioctl_ptr.ioctl_ptr = ctrl_cmd;
-
-    new_ctrl_cmd.type = ctrl_cmd->type;
-    new_ctrl_cmd.status = CAM_CTRL_ACCEPTED;
-    new_ctrl_cmd.evt_id = ctrl_cmd->evt_id;
-    new_ctrl_cmd.length = value_len;
-
-    ctrl_cmd->status = CAM_CTRL_ACCEPTED;
-    ctrl_cmd->length = length;
-
-    ctrl_data = malloc(length);
-    memcpy((void *)ctrl_data, (void *)&new_ctrl_cmd, sizeof(struct msm_ctrl_cmd));
-    if (value)
-        memcpy((void *)(ctrl_data + sizeof(new_ctrl_cmd)), value,
-                value_len);
-    ctrl_cmd->value = (void *)ctrl_data;
-
-    rc = ioctl(mm_obj->server_fd, MSM_CAM_V4L2_IOCTL_CTRL_CMD_DONE, &ioctl_ptr);
-    free(ctrl_data);
-
-    return rc;
-}
-
-static void mm_daemon_set_parm_bit(cam_prop_t *properties)
-{
-    SET_PARM_BIT32(CAMERA_SET_PARM_DIMENSION, properties->parm);
-    SET_PARM_BIT32(CAMERA_GET_CAPABILITIES, properties->parm);
-}
-
-static void mm_daemon_set_parm(cam_ctrl_dimension_t *parms)
-{
-    parms->video_width = 640;
-    parms->video_height = 480;
-    parms->picture_width = 2592;
-    parms->picture_height = 1944;
-    parms->display_width = 800;
-    parms->display_height = 480;
-    parms->ui_thumbnail_width = 320;
-    parms->ui_thumbnail_height = 240;
-    parms->raw_picture_width = 640;
-    parms->raw_picture_height = 480;
-}
-
-static void mm_daemon_set_properties(cam_prop_t *properties)
-{
-    mm_daemon_set_parm_bit(properties);
-    properties->max_pict_width = 2592;
-    properties->max_pict_height = 1944;
-    properties->max_preview_width = 720;
-    properties->max_preview_height = 480;
-    properties->max_video_width = 720;
-    properties->max_video_height = 480;
-    properties->default_preview_width = 720;
-    properties->default_preview_height = 480;
-    properties->preview_format = CAMERA_YUV_420_NV12;
-}
-
-static void mm_daemon_parm_get_focal_length(focus_distances_info_t *focus_distance)
-{
-    focus_distance->focus_distance[0] = 0.0f;
-    focus_distance->real_gain = 0.5f;
-    focus_distance->exp_time = 0.0f;
-}
-
-static void mm_daemon_parm_frame_offset(cam_frame_resolution_t *frame_offset)
-{
-    int i;
-    int num_planes = 2;
-    frame_offset->frame_offset.num_planes = num_planes;
-    frame_offset->frame_offset.mp[0].len = 0x4b000;
-    frame_offset->frame_offset.mp[1].len = 0x26000;
-    for (i = 0; i < num_planes; i++)
-        frame_offset->frame_offset.mp[i].offset = 0;
-    frame_offset->frame_offset.frame_len = 0x71000;
-}
-
-static int mm_daemon_vfe_cmd(mm_daemon_obj_t *mm_obj, int cmd_type, int cmd,
-        int length, void *value, unsigned int ioctl_cmd)
-{
-    int rc = 0;
-    struct msm_vfe_cfg_cmd cfgcmd;
-    struct msm_isp_cmd vfecmd;
-
-    memset(&cfgcmd, 0, sizeof(cfgcmd));
-    memset(&vfecmd, 0, sizeof(vfecmd));
-    vfecmd.id = cmd;
-    vfecmd.length = length;
-    vfecmd.value = value;
-    cfgcmd.cmd_type = cmd_type;
-    cfgcmd.length = sizeof(vfecmd);
-    cfgcmd.value = (void *)&vfecmd;
-    rc = ioctl(mm_obj->cfg_fd, ioctl_cmd, &cfgcmd);
-
-    return rc;
-}
-
-static int mm_daemon_config_sensor(mm_daemon_obj_t *mm_obj, int rs, int type)
-{
-    int rc = 0;
-    struct sensor_cfg_data cdata;
-
-    cdata.mode = 0;
-    cdata.cfgtype = type;
-    cdata.rs = rs;
-    rc = ioctl(mm_obj->cfg_fd, MSM_CAM_IOCTL_SENSOR_IO_CFG, &cdata);
-    return rc;
-}
-
-static int mm_daemon_config_set_subdev(mm_daemon_obj_t *mm_obj,
-        enum msm_cam_subdev_type sdev_type)
-{
-    int rc = 0;
-    struct msm_mctl_set_sdev_data set_data;
-
-    set_data.sdev_type = sdev_type;
-    set_data.revision = mm_obj->sd_revision[sdev_type];
-
-    rc = ioctl(mm_obj->cfg_fd, MSM_CAM_IOCTL_SET_MCTL_SDEV, &set_data);
-    return rc;
-}
-
-static int mm_daemon_config_unset_subdev(mm_daemon_obj_t *mm_obj,
-        enum msm_cam_subdev_type sdev_type)
-{
-    int rc = 0;
-    struct msm_mctl_set_sdev_data set_data;
-
-    set_data.sdev_type = sdev_type;
-    set_data.revision = mm_obj->sd_revision[sdev_type];
-
-    rc = ioctl(mm_obj->cfg_fd, MSM_CAM_IOCTL_UNSET_MCTL_SDEV, &set_data);
-    return rc;
-}
-
-static int mm_daemon_start_preview(mm_daemon_obj_t *mm_obj)
-{
-    int rc = 0;
-    uint32_t operation_mode;
-
-    rc = mm_daemon_config_sensor(mm_obj, MSM_SENSOR_RES_QTR, CFG_SET_MODE);
-    if (rc < 0)
-        goto end;
-    mm_obj->curr_gain = 0x20;
-    rc = mm_daemon_config_exp_gain(mm_obj, mm_obj->curr_gain, 0x31f);
-    if (rc < 0)
-        goto end;
-    operation_mode = VFE_OUTPUTS_PREVIEW_AND_VIDEO;
-    rc = ioctl(mm_obj->cfg_fd, MSM_CAM_IOCTL_SET_VFE_OUTPUT_TYPE, &operation_mode);
-    if (rc < 0)
-        goto end;
-
-    rc = mm_daemon_vfe_cmd(mm_obj, CMD_GENERAL, VFE_CMD_RESET, 0, NULL,
-            MSM_CAM_IOCTL_CONFIG_VFE);
-    if (rc < 0)
-        goto end;
-
-end:
-    return rc;
-}
-
-static int mm_daemon_set_fmt_mplane(mm_daemon_obj_t *mm_obj,
-        struct msm_ctrl_cmd *ctrl_cmd, struct img_plane_info *plane_info)
-{
-    int rc = 0;
-
-    plane_info->plane[0].offset = 0x0;
-    plane_info->plane[0].size = 0x4b000;
-    plane_info->plane[1].offset = 0x0;
-    plane_info->plane[1].size = 0x26000;
-    mm_obj->inst_handle = plane_info->inst_handle;
-    ctrl_cmd->length = sizeof(struct img_plane_info);
-    ctrl_cmd->value = plane_info;
-    ctrl_cmd->status = 1;
-    return rc;
-}
-
-static int mm_daemon_open_config(mm_daemon_obj_t *mm_obj, char *config_node)
-{
-    char config_dev[32];
-    int rc = 0;
-    int n_try = 2;
-
-    snprintf(config_dev, sizeof(config_dev), "/dev/msm_camera/%s",
-            config_node);
-    do {
-        n_try--;
-        mm_obj->cfg_fd = open(config_dev, O_RDWR | O_NONBLOCK);
-        if ((mm_obj->cfg_fd > 0) || (errno != EIO) || (n_try <= 0)) {
-            ALOGI("%s: config opened", __FUNCTION__);
-            break;
+    p_table = mm_obj->parm_buf.buf;
+    current = GET_FIRST_PARAM_ID(p_table);
+    position = current;
+    while (next) {
+        switch (position) {
+            case CAM_INTF_PARM_HAL_VERSION: {
+                int32_t hal_version;
+                memcpy(&hal_version, POINTER_OF(current, p_table), sizeof(hal_version));
+                break;
+            }
+            case CAM_INTF_PARM_ANTIBANDING: {
+                int32_t value;
+                memcpy(&value, POINTER_OF(current, p_table), sizeof(value));
+                break;
+            }
+            case CAM_INTF_PARM_SET_PP_COMMAND: {
+                tune_cmd_t pp_cmd;
+                memcpy(&pp_cmd, POINTER_OF(current, p_table), sizeof(pp_cmd));
+                break;
+            }
+            case CAM_INTF_PARM_TINTLESS: {
+                int32_t value;
+                memcpy(&value, POINTER_OF(current, p_table), sizeof(value));
+                break;
+            }
+            default:
+                next = 0;
+                break;
         }
-        usleep(10000);
-    } while (n_try > 0);
-
-    if (mm_obj->cfg_fd <= 0) {
-        ALOGE("%s: cannot open config device", __FUNCTION__);
-        rc = -1;
+        position = GET_NEXT_PARAM_ID(current, p_table);
+        if (position == 0 || position == current)
+            next = 0;
+        else
+            current = position;
     }
-    return rc;
 }
 
-static int mm_daemon_vpe_start(mm_daemon_obj_t *mm_obj)
+static void mm_daemon_capability_fill(mm_daemon_obj_t *mm_obj)
 {
-    int rc = 0;
-    struct msm_mctl_post_proc_cmd mctl_pp_cmd;
-    struct msm_vpe_clock_rate clk_rate;
+    cam_capability_t mm_cap;
 
-    memset(&mctl_pp_cmd, 0, sizeof(mctl_pp_cmd));
-    memset(&clk_rate, 0, sizeof(clk_rate));
-    mctl_pp_cmd.type = MSM_PP_CMD_TYPE_VPE;
-    mctl_pp_cmd.cmd.id = VPE_CMD_ENABLE;
-    mctl_pp_cmd.cmd.length = sizeof(clk_rate);
-    mctl_pp_cmd.cmd.value = &clk_rate;
-    rc = ioctl(mm_obj->cfg_fd, MSM_CAM_IOCTL_MCTL_POST_PROC, &mctl_pp_cmd);
-    if (rc == 0)
-        mm_obj->vpe_enabled = 1;
-    return rc;
+    memset(&mm_cap, 0, sizeof(cam_capability_t));
+    mm_cap.picture_sizes_tbl[0].width = 2592;
+    mm_cap.picture_sizes_tbl[0].height = 1952;
+    mm_cap.picture_sizes_tbl[1].width = 2592;
+    mm_cap.picture_sizes_tbl[1].height = 1936;
+    mm_cap.picture_sizes_tbl[2].width = 2592;
+    mm_cap.picture_sizes_tbl[2].height = 1456;
+    mm_cap.picture_sizes_tbl_cnt = 3;
+
+    mm_cap.preview_sizes_tbl_cnt = 2;
+    mm_cap.preview_sizes_tbl[0].width = 1280;
+    mm_cap.preview_sizes_tbl[0].height = 720;
+    mm_cap.preview_sizes_tbl[1].width = 640;
+    mm_cap.preview_sizes_tbl[1].height = 480;
+
+    mm_cap.video_sizes_tbl_cnt = 2;
+    mm_cap.video_sizes_tbl[0].width = 1280;
+    mm_cap.video_sizes_tbl[0].height = 720;
+    mm_cap.video_sizes_tbl[1].width = 640;
+    mm_cap.video_sizes_tbl[1].height = 480;
+
+    mm_cap.scale_picture_sizes_cnt = 4;
+    mm_cap.scale_picture_sizes[0].width = 640;
+    mm_cap.scale_picture_sizes[0].height = 480;
+    mm_cap.scale_picture_sizes[1].width = 512;
+    mm_cap.scale_picture_sizes[1].height = 384;
+    mm_cap.scale_picture_sizes[2].width = 384;
+    mm_cap.scale_picture_sizes[2].height = 288;
+    mm_cap.scale_picture_sizes[3].width = 0;
+    mm_cap.scale_picture_sizes[3].height = 0;
+    
+
+    mm_cap.supported_focus_modes_cnt = 1;
+    mm_cap.supported_focus_modes[0] = CAM_FOCUS_MODE_FIXED;
+
+    mm_cap.supported_preview_fmt_cnt = 4;
+    mm_cap.supported_preview_fmts[0] = CAM_FORMAT_YUV_420_NV12;
+    mm_cap.supported_preview_fmts[1] = CAM_FORMAT_YUV_420_NV21;
+    mm_cap.supported_preview_fmts[2] = CAM_FORMAT_YUV_420_NV21_ADRENO;
+    mm_cap.supported_preview_fmts[3] = CAM_FORMAT_YUV_420_YV12;
+
+    mm_cap.zoom_supported = 1;
+    mm_cap.zoom_ratio_tbl_cnt = 2;
+    mm_cap.zoom_ratio_tbl[0] = 1;
+    mm_cap.zoom_ratio_tbl[1] = 2;
+
+    mm_cap.focal_length = 3.53;
+
+    mm_cap.supported_iso_modes[0] = CAM_ISO_MODE_AUTO;
+    mm_cap.supported_iso_modes[1] = CAM_ISO_MODE_DEBLUR;
+    mm_cap.supported_iso_modes[2] = CAM_ISO_MODE_100;
+    mm_cap.supported_iso_modes[3] = CAM_ISO_MODE_200;
+    mm_cap.supported_iso_modes[4] = CAM_ISO_MODE_400;
+    mm_cap.supported_iso_modes[5] = CAM_ISO_MODE_800;
+    mm_cap.supported_iso_modes_cnt = 6;
+
+    mm_cap.supported_flash_modes[0] = CAM_FLASH_MODE_OFF;
+    mm_cap.supported_flash_modes[1] = CAM_FLASH_MODE_AUTO;
+    mm_cap.supported_flash_modes[2] = CAM_FLASH_MODE_ON;
+    mm_cap.supported_flash_modes[3] = CAM_FLASH_MODE_TORCH;
+    mm_cap.supported_flash_modes_cnt = 4;
+
+    mm_cap.fps_ranges_tbl[0].min_fps = 9.0;
+    mm_cap.fps_ranges_tbl[0].max_fps = 29.453;
+    mm_cap.fps_ranges_tbl_cnt = 1;
+
+    mm_cap.sensor_mount_angle = 90;
+
+    memcpy(mm_obj->cap_buf.vaddr, &mm_cap, sizeof(mm_cap));
 }
 
-static int mm_daemon_proc_ctrl_cmd(mm_daemon_obj_t *mm_obj,
-        struct msm_ctrl_cmd *ctrl_cmd, void *cmd_data)
-{
-    int rc = 0;
-    int length;
-    struct msm_ctrl_cmd *priv_ctrl_cmd;
-    void *cmd_value;
-
-    priv_ctrl_cmd = (struct msm_ctrl_cmd *)cmd_data;
-    cmd_value = (void *)((uint32_t)cmd_data + sizeof(struct msm_ctrl_cmd));
-
-    switch (priv_ctrl_cmd->type) {
-        case CAMERA_SET_PARM_DIMENSION: { /* 1 */
-            cam_ctrl_dimension_t parms;
-            length = sizeof(struct msm_ctrl_cmd) + sizeof(parms);
-            memset(&parms, 0, sizeof(parms));
-            mm_daemon_set_parm(&parms);
-            rc = mm_daemon_ctrl_cmd_done(mm_obj, ctrl_cmd, length, (void *)&parms);
-            break;
-        }
-        case CAMERA_SET_PARM_EXPOSURE_COMPENSATION: { /* 8 */
-            break;
-        }
-        case CAMERA_SET_PARM_FPS: { /* 16 */
-            break;
-        }
-        case CAMERA_SET_PARM_BESTSHOT_MODE: { /* 27 */
-            break;
-        }
-        case CAMERA_SET_PARM_ROLLOFF: { /* 37 */
-            int8_t shadeValue = 0;
-            length = sizeof(struct msm_ctrl_cmd) + sizeof(int8_t);
-            rc = mm_daemon_ctrl_cmd_done(mm_obj, ctrl_cmd, length, (void *)&shadeValue);
-            break;
-        }
-        case CAMERA_GET_PARM_MAXZOOM: { /* 47 */
-            int maxzoom = 2;
-            length = sizeof(struct msm_ctrl_cmd) + sizeof(int);
-            rc = mm_daemon_ctrl_cmd_done(mm_obj, ctrl_cmd, length, (void *)&maxzoom);
-            break;
-        }
-        case CAMERA_GET_PARM_ZOOMRATIOS: { /* 48 */
-            break;
-        }
-        case CAMERA_SET_PARM_LED_MODE: { /* 50 */
-            break;
-        }
-        case CAMERA_SET_FPS_MODE: { /* 56 */
-            break;
-        }
-        case CAMERA_GET_CAPABILITIES: { /* 71 */
-            cam_prop_t properties;
-            length = sizeof(struct msm_ctrl_cmd) + sizeof(properties);
-            memset(&properties, 0, sizeof(properties));
-            mm_daemon_set_properties(&properties);
-            rc = mm_daemon_ctrl_cmd_done(mm_obj, ctrl_cmd, length, (void *)&properties);
-            break;
-        }
-        case CAMERA_GET_PARM_FOCAL_LENGTH: { /* 81 */
-            focus_distances_info_t focus_distance;
-            length = sizeof(struct msm_ctrl_cmd) + sizeof(focus_distance);
-            memset(&focus_distance, 0, sizeof(focus_distance));
-            mm_daemon_parm_get_focal_length(&focus_distance);
-            rc = mm_daemon_ctrl_cmd_done(mm_obj, ctrl_cmd, length,
-                    (void *)&focus_distance);
-            break;
-        }
-        case CAMERA_SET_PARM_WAVELET_DENOISE: { /* 84 */
-            break;
-        }
-        case CAMERA_SET_PARM_MCE: { /* 85 */
-            int32_t MCEValue;
-            length = sizeof(struct msm_ctrl_cmd) + sizeof(int32_t);
-            rc = mm_daemon_ctrl_cmd_done(mm_obj, ctrl_cmd, length, (void *)&MCEValue);
-            break;
-        }
-        case CAMERA_SET_PARM_HFR: { /* 89 */
-            break;
-        }
-        case CAMERA_SET_REDEYE_REDUCTION: { /* 90 */
-            break;
-        }
-        case CAMERA_SET_PARM_PREVIEW_FORMAT: { /* 94 */
-            int preview_format;
-            length = sizeof(struct msm_ctrl_cmd) + sizeof(int32_t);
-            preview_format = CAMERA_YUV_420_NV21;
-            rc = mm_daemon_ctrl_cmd_done(mm_obj, ctrl_cmd, length,
-                    (void *)&preview_format);
-            break;
-        }
-        case CAMERA_SET_RECORDING_HINT: { /* 107 */
-            uint32_t recording_hint;
-            length = sizeof(struct msm_ctrl_cmd) + sizeof(int32_t);
-            rc = mm_daemon_ctrl_cmd_done(mm_obj, ctrl_cmd, length,
-                    (void *)&recording_hint);
-            break;
-        }
-        case CAMERA_GET_PARM_MAX_HFR_MODE: { /* 111 */
-            camera_hfr_mode_t hfr_mode;
-            length = sizeof(struct msm_ctrl_cmd) + sizeof(hfr_mode);
-            memset(&hfr_mode, 0, sizeof(hfr_mode));
-            rc = mm_daemon_ctrl_cmd_done(mm_obj, ctrl_cmd, length, (void *)&hfr_mode);
-            break;
-        }
-        case CAMERA_GET_PARM_FRAME_RESOLUTION: { /* 126 */
-            cam_frame_resolution_t frame_offset;
-            length = sizeof(struct msm_ctrl_cmd) + sizeof(frame_offset);
-            memset(&frame_offset, 0, sizeof(frame_offset));
-            memcpy(&frame_offset, cmd_value, sizeof(frame_offset));
-            mm_daemon_parm_frame_offset(&frame_offset);
-            rc = mm_daemon_ctrl_cmd_done(mm_obj, ctrl_cmd, length,
-                    (void *)&frame_offset);
-            break;
-        }
-        case CAMERA_SET_INFORM_STARTPREVIEW: { /* 135 */
-            int32_t didx = 0;
-            length = sizeof(struct msm_ctrl_cmd) + sizeof(int32_t);
-            rc = mm_daemon_ctrl_cmd_done(mm_obj, ctrl_cmd, length, (void *)&didx);
-            break;
-        }
-        default:
-            ALOGI("%s: unknown ctrl type %d", __FUNCTION__, priv_ctrl_cmd->type);
-            break;
-    }
-    return rc;
-}
-
-int mm_daemon_notify(mm_daemon_obj_t *mm_obj)
+static void mm_daemon_notify(mm_daemon_obj_t *mm_obj)
 {
     struct v4l2_event ev;
-    struct msm_camera_v4l2_ioctl_t ioctl_ptr;
-    struct msm_ctrl_cmd ctrl_cmd;
-    struct msm_isp_event_ctrl isp_evt;
-    uint8_t ctrl_cmd_data[512];
-    void *cmd_value;
-    int rc = 0;
+    struct v4l2_event new_ev;
+    struct msm_v4l2_event_data *msm_evt = NULL;
+    unsigned int status = MSM_CAMERA_ERR_CMD_FAIL;
 
     memset(&ev, 0, sizeof(ev));
-    memset(&ioctl_ptr, 0, sizeof(ioctl_ptr));
-    memset(&ctrl_cmd, 0, sizeof(struct msm_ctrl_cmd));
-    memset(&isp_evt, 0, sizeof(isp_evt));
-    memset(&ctrl_cmd_data, 0, 512);
+    memset(&new_ev, 0, sizeof(new_ev));
+    if (ioctl(mm_obj->server_fd, VIDIOC_DQEVENT, &ev) < 0) {
+        ALOGE("%s: Error dequeueing event", __FUNCTION__);
+        goto cmd_ack;
+    }
+    msm_evt = (struct msm_v4l2_event_data *)ev.u.data;
 
-    isp_evt.isp_data.ctrl.value = (uint32_t *)&ctrl_cmd_data;
-    /* Stick a pointer to isp_evt into the payload */
-    ioctl_ptr.ioctl_ptr = (void *)&isp_evt;
-
-    /* V4L2 dequeue the queue index */
-    rc = ioctl(mm_obj->server_fd, VIDIOC_DQEVENT, &ev);
-    if (rc < 0)
-        goto dequeue_error;
-
-    isp_evt.isp_data.ctrl.queue_idx = ev.u.data[0];
-    /* MSM dequeue the control data */
-    if (ioctl(mm_obj->server_fd, MSM_CAM_V4L2_IOCTL_GET_EVENT_PAYLOAD,
-            &ioctl_ptr) < 0)
-        goto dequeue_error;
-
-    ioctl_ptr.ioctl_ptr = &ctrl_cmd;
-    cmd_value = malloc(isp_evt.isp_data.ctrl.length);
-    memcpy(cmd_value, &ctrl_cmd_data, isp_evt.isp_data.ctrl.length);
-    ctrl_cmd.evt_id = isp_evt.isp_data.ctrl.evt_id;
-    ctrl_cmd.length = 0;
-
-    switch (isp_evt.isp_data.ctrl.type) {
-        case MSM_V4L2_VID_CAP_TYPE: /* 0 */
-            mm_daemon_set_fmt_mplane(mm_obj, &ctrl_cmd,
-                    (struct img_plane_info *)cmd_value);
-            rc = ioctl(mm_obj->server_fd, MSM_CAM_V4L2_IOCTL_CTRL_CMD_DONE, &ioctl_ptr);
+    if (ev.id != MSM_CAMERA_NEW_SESSION && mm_obj->cfg_state == STATE_STOPPED) {
+        ALOGE("ERROR: Unable to handle command without active config thread");
+        if (mm_obj->cfg_shutdown)
+            goto cmd_ack;
+        else {
+            mm_obj->cfg_shutdown = 1;
+            mm_daemon_pack_event(mm_obj, &new_ev, CAM_EVENT_TYPE_DAEMON_DIED,
+                    MSM_CAMERA_PRIV_SHUTDOWN, msm_evt->stream_id, MSM_CAMERA_STATUS_SUCCESS);
+            ioctl(mm_obj->server_fd, MSM_CAM_V4L2_IOCTL_NOTIFY, &new_ev);
+            return;
+        }
+    }
+    switch (ev.id) {
+        case MSM_CAMERA_NEW_SESSION:
+            mm_obj->session_id = msm_evt->session_id;
+            mm_obj->stream_id = msm_evt->stream_id;
+            pthread_mutex_lock(&mm_obj->mutex);
+            mm_daemon_config_open(mm_obj);
+            pthread_cond_wait(&mm_obj->cond, &mm_obj->mutex);
+            pthread_mutex_unlock(&mm_obj->mutex);
+            status = MSM_CAMERA_CMD_SUCESS;
             break;
-        case MSM_V4L2_STREAM_ON: /* 1 */
-            ctrl_cmd.status = 1;
-            rc = ioctl(mm_obj->server_fd, MSM_CAM_V4L2_IOCTL_CTRL_CMD_DONE, &ioctl_ptr);
-            if (rc < 0)
-                break;
-            if (mm_daemon_start_preview(mm_obj) < 0)
-                goto general_error;
+        case MSM_CAMERA_DEL_SESSION:
+            mm_daemon_server_config_cmd(mm_obj, CFG_CMD_SHUTDOWN,
+                    msm_evt->stream_id);
+            mm_daemon_config_close(mm_obj);
+            status = MSM_CAMERA_CMD_SUCESS;
             break;
-        case MSM_V4L2_STREAM_OFF: /* 2 */
-            ctrl_cmd.status = 1;
-            rc = ioctl(mm_obj->server_fd, MSM_CAM_V4L2_IOCTL_CTRL_CMD_DONE, &ioctl_ptr);
-            break;
-        case MSM_V4L2_SET_CTRL: /* 6 */
-            ctrl_cmd.length = 0;
-            ctrl_cmd.status = 1;
-            rc = ioctl(mm_obj->server_fd, MSM_CAM_V4L2_IOCTL_CTRL_CMD_DONE, &ioctl_ptr);
-            break;
-        case MSM_V4L2_OPEN: /* 10 */
-            ctrl_cmd.status = 0;
-            if (mm_daemon_open_config(mm_obj, (char *)cmd_value) == 0) {
-                if (mm_daemon_config_start(mm_obj) == 0)
-                    ctrl_cmd.status = 1;
-            } else {
-                free(cmd_value);
-                return -1;
+        case MSM_CAMERA_SET_PARM:
+            switch (msm_evt->command) {
+                case MSM_CAMERA_PRIV_STREAM_ON:
+                    mm_daemon_server_config_cmd(mm_obj, CFG_CMD_STREAM_START,
+                            msm_evt->stream_id);
+                    break;
+                case MSM_CAMERA_PRIV_STREAM_OFF:
+                    mm_daemon_server_config_cmd(mm_obj, CFG_CMD_STREAM_STOP,
+                            msm_evt->stream_id);
+                    break;
+                case MSM_CAMERA_PRIV_NEW_STREAM:
+                    mm_obj->stream_id = msm_evt->stream_id;
+                    if (msm_evt->stream_id > 0)
+                        mm_daemon_server_config_cmd(mm_obj, CFG_CMD_NEW_STREAM,
+                                msm_evt->stream_id);
+                    break;
+                case MSM_CAMERA_PRIV_DEL_STREAM:
+                    if (msm_evt->stream_id > 0)
+                        mm_daemon_server_config_cmd(mm_obj, CFG_CMD_DEL_STREAM,
+                                msm_evt->stream_id);
+                    break;
+                case CAM_PRIV_PARM:
+                    if (mm_obj->parm_buf.mapped)
+                        mm_daemon_parm(mm_obj);
+                    break;
+                case MSM_CAMERA_PRIV_S_FMT:
+                case MSM_CAMERA_PRIV_SHUTDOWN:
+                case MSM_CAMERA_PRIV_STREAM_INFO_SYNC:
+                case CAM_PRIV_STREAM_INFO_SYNC:
+                case CAM_PRIV_STREAM_PARM:
+                    break;
+                default:
+                    goto cmd_ack;
+                    break;
             }
-
-            rc = ioctl(mm_obj->server_fd, MSM_CAM_V4L2_IOCTL_CTRL_CMD_DONE, &ioctl_ptr);
-            /* TODO: move sensor config to config thread */
-            rc = mm_daemon_config_sensor(mm_obj, MSM_SENSOR_RES_QTR, CFG_SENSOR_INIT);
-            mm_obj->vfe_fd = open(mm_daemon_server_find_subdev(mm_obj,
-                    VFE_DEV), O_RDWR | O_NONBLOCK);
-            if (mm_obj->vfe_fd <= 0) {
-                ALOGE("%s: cannot open vfe device", __FUNCTION__);
-                return -1;
-            } else
-                ALOGI("%s: vfe opened", __FUNCTION__);
-            mm_daemon_config_set_subdev(mm_obj, VFE_DEV);
-            rc = ioctl(mm_obj->vfe_fd, VIDIOC_MSM_VFE_INIT);
+            status = MSM_CAMERA_CMD_SUCESS;
             break;
-        case MSM_V4L2_CLOSE: /* 11 */
-            ctrl_cmd.status = 1;
-            if (mm_obj->vfe_fd) {
-                ioctl(mm_obj->vfe_fd, VIDIOC_MSM_VFE_RELEASE);
-                close(mm_obj->vfe_fd);
-                mm_obj->vfe_fd = 0;
+        case MSM_CAMERA_GET_PARM:
+            switch (msm_evt->command) {
+                case MSM_CAMERA_PRIV_QUERY_CAP:
+                    if (mm_obj->cap_buf.mapped) {
+                        mm_daemon_capability_fill(mm_obj);
+                        status = MSM_CAMERA_CMD_SUCESS;
+                    } else
+                        ALOGE("%s: Error: Capability buffer not mapped",
+                                __FUNCTION__);
+                    break;
+                default:
+                    break;
             }
-            rc = ioctl(mm_obj->server_fd, MSM_CAM_V4L2_IOCTL_CTRL_CMD_DONE, &ioctl_ptr);
-            mm_obj->state = STATE_STOPPED;
-            break;
-        case MSM_V4L2_SET_CTRL_CMD: /* 12 */
-            if (mm_daemon_proc_ctrl_cmd(mm_obj, &ctrl_cmd, cmd_value) < 0)
-                goto general_error;
             break;
         default:
-            ALOGI("%s: unknown type %d", __FUNCTION__, isp_evt.isp_data.ctrl.type);
             break;
     }
-    if (cmd_value)
-        free(cmd_value);
+cmd_ack:
+    mm_daemon_pack_event(mm_obj, &new_ev, 0, ev.id, msm_evt->stream_id, status);
+    ioctl(mm_obj->server_fd, MSM_CAM_V4L2_IOCTL_CMD_ACK, &new_ev);
+}
 
-    return rc;
+int mm_daemon_server_pipe_cmd(mm_daemon_obj_t *mm_obj)
+{
+    int rc = 0;
+    ssize_t read_len;
+    struct v4l2_event ev;
+    mm_daemon_pipe_evt_t pipe_cmd;
 
-dequeue_error:
-    ALOGE("%s: Error dequeuing event", __FUNCTION__);
-general_error:
-    if (cmd_value)
-        free(cmd_value);
-    rc = -1;
-    mm_obj->state = STATE_STOPPED;
+    read_len = read(mm_obj->svr_pfds[0], &pipe_cmd, sizeof(pipe_cmd));
+    switch (pipe_cmd.cmd) {
+        case SERVER_CMD_MAP_UNMAP_DONE:
+            mm_daemon_pack_event(mm_obj, &ev, CAM_EVENT_TYPE_MAP_UNMAP_DONE,
+                    MSM_CAMERA_MSM_NOTIFY, pipe_cmd.val,
+                    MSM_CAMERA_STATUS_SUCCESS);
+            rc = ioctl(mm_obj->server_fd, MSM_CAM_V4L2_IOCTL_NOTIFY, &ev);
+            break;
+        default:
+            ALOGI("%s: Unknown command on pipe", __FUNCTION__);
+    }
     return rc;
 }
 
@@ -577,16 +362,21 @@ int mm_daemon_poll_fn(mm_daemon_obj_t *mm_obj)
     int rc = 0, i;
     struct pollfd fds[2];
 
+    pipe(mm_obj->svr_pfds);
     mm_obj->state = STATE_POLL;
+    fds[0].fd = mm_obj->server_fd;
+    fds[1].fd = mm_obj->svr_pfds[0];
     do {
-        for (i = 0; i < 2; i++) {
-            fds[i].fd = mm_obj->server_fd;
+        for (i = 0; i < 2; i++)
             fds[i].events = POLLIN|POLLRDNORM|POLLPRI;
-        }
         rc = poll(fds, 2, -1);
         if (rc > 0) {
-            if (fds[0].revents & POLLPRI)
-                    rc = mm_daemon_notify(mm_obj);
+            if ((fds[0].revents & POLLIN) &&
+                    (fds[0].revents & POLLRDNORM))
+                mm_daemon_notify(mm_obj);
+            else if ((fds[1].revents & POLLIN) &&
+                    (fds[1].revents & POLLRDNORM))
+                mm_daemon_server_pipe_cmd(mm_obj);
             else
                 usleep(1000);
         } else {
@@ -597,108 +387,30 @@ int mm_daemon_poll_fn(mm_daemon_obj_t *mm_obj)
     return rc;
 }
 
-int mm_daemon_evt_sub(mm_daemon_obj_t *mm_obj, int subscribe)
+static int mm_daemon_subscribe(mm_daemon_obj_t *mm_obj, int subscribe)
 {
     int rc = 0;
+    uint32_t i;
+    int cmd = subscribe ? VIDIOC_SUBSCRIBE_EVENT : VIDIOC_UNSUBSCRIBE_EVENT;
     struct v4l2_event_subscription sub;
 
     memset(&sub, 0, sizeof(sub));
-    sub.type = V4L2_EVENT_PRIVATE_START + MSM_CAM_RESP_V4L2;
-    if (subscribe == 0) {
-        rc = ioctl(mm_obj->server_fd, VIDIOC_UNSUBSCRIBE_EVENT, &sub);
+    sub.type = MSM_CAMERA_V4L2_EVENT_TYPE;
+    for (i = 0; i < ARRAY_SIZE(msm_events); i++) {
+        sub.id = msm_events[i];
+        rc = ioctl(mm_obj->server_fd, cmd, &sub);
         if (rc < 0) {
-            ALOGE("%s: unsubscribe event rc=%d", __FUNCTION__, rc);
-            return rc;
-        }
-    } else {
-        rc = ioctl(mm_obj->server_fd, VIDIOC_SUBSCRIBE_EVENT, &sub);
-        if (rc < 0) {
-            ALOGE("%s: subscribe event rc=%d", __FUNCTION__, rc);
+            ALOGE("Error: event reg/unreg failed %d", rc);
             return rc;
         }
     }
     return rc;
-}
-
-static int mm_daemon_proc_packet_map(mm_daemon_obj_t *mm_obj,
-        cam_sock_packet_t *packet)
-{
-    int rc = 0;
-
-    switch (packet->payload.frame_fd_map.ext_mode) {
-        case MSM_V4L2_EXT_CAPTURE_MODE_PREVIEW:
-            break;
-        default:
-            break;
-    }
-    return rc;
-}
-
-static int mm_daemon_proc_packet(mm_daemon_socket_t *mm_sock,
-        cam_sock_packet_t *packet)
-{
-    int rc = 0;
-    mm_daemon_obj_t *mm_obj = (mm_daemon_obj_t *)mm_sock->daemon_obj;
-
-    switch (packet->msg_type) {
-        case CAM_SOCK_MSG_TYPE_FD_MAPPING:
-            rc = mm_daemon_proc_packet_map(mm_obj, packet);
-            break;
-        case CAM_SOCK_MSG_TYPE_FD_UNMAPPING:
-            break;
-        default:
-            rc = -1;
-            break;
-    }
-    return rc;
-}
-
-static void *mm_daemon_sock_mon(void *data)
-{
-    mm_daemon_socket_t *mm_sock = (mm_daemon_socket_t *)data;
-    cam_sock_packet_t packet;
-    struct msghdr msgh;
-    struct iovec iov[1];
-    char control[CMSG_SPACE(sizeof(int))];
-    int rc = 0;
-    int i;
-
-    mm_sock->state = SOCKET_STATE_CONNECTED;
-
-    do {
-        memset(&msgh, 0, sizeof(msgh));
-        memset(&packet, 0, sizeof(cam_sock_packet_t));
-        msgh.msg_name = NULL;
-        msgh.msg_namelen = 0;
-        msgh.msg_control = control;
-        msgh.msg_controllen = sizeof(control);
-
-        iov[0].iov_base = &packet;
-        iov[0].iov_len = sizeof(cam_sock_packet_t);
-        msgh.msg_iov = iov;
-        msgh.msg_iovlen = 1;
-
-        rc = recvmsg(mm_sock->sock_fd, &(msgh), 0);
-
-        mm_daemon_proc_packet(mm_sock, &packet);
-    } while (mm_sock->state == SOCKET_STATE_CONNECTED);
-    return NULL;
-}
-
-static int mm_daemon_start_sock_thread(mm_daemon_socket_t *mm_sock)
-{
-    pthread_create(&mm_sock->pid, NULL, mm_daemon_sock_mon, (void *)mm_sock);
-    return 0;
 }
 
 int mm_daemon_open()
 {
-    int sock;
-    struct sockaddr_un sockaddr;
     int rc = 0;
     int n_try = 2;
-    int cam_id = 0;
-    int i;
     mm_daemon_obj_t *mm_obj;
 
     mm_obj = (mm_daemon_obj_t *)malloc(sizeof(mm_daemon_obj_t));
@@ -706,55 +418,31 @@ int mm_daemon_open()
         rc = -1;
         goto mem_error;
     }
+    memset(mm_obj, 0, sizeof(mm_daemon_obj_t));
 
-    sock = socket(AF_UNIX, SOCK_DGRAM, 0);
-    if (sock < 0) {
-        ALOGE("%s: Error creating socket", __FUNCTION__);
-        goto error;
-    }
-    memset(&sockaddr, 0, sizeof(sockaddr));
-    sockaddr.sun_family = AF_UNIX;
-    snprintf(sockaddr.sun_path, sizeof(sockaddr.sun_path), "/data/cam_socket%d",
-            cam_id);
-    rc = unlink(sockaddr.sun_path);
-    if (rc != 0 && errno != ENOENT) {
-        ALOGE("%s: failed to unlink old socket '%s': %s", __FUNCTION__,
-                sockaddr.sun_path, strerror(errno));
-        goto error;
-    }
-    rc = bind(sock, (struct sockaddr *)&sockaddr, sizeof(sockaddr));
-    if (rc) {
-        ALOGE("%s: socket=%d %s", __FUNCTION__, sock, strerror(errno));
-        goto socket_error;
-    }
-
-    chmod(sockaddr.sun_path, 0660);
-    mm_obj->sock_obj.sock_fd = sock;
-    mm_obj->sock_obj.daemon_obj = mm_obj;
-
-    mm_daemon_start_sock_thread(&mm_obj->sock_obj);
+    pthread_mutex_init(&sd_lock, NULL);
+    pthread_mutex_init(&(mm_obj->mutex), NULL);
+    pthread_mutex_init(&(mm_obj->cfg_lock), NULL);
+    pthread_cond_init(&(mm_obj->cond), NULL);
 
     /* Open the server device */
     do {
         n_try--;
-        mm_obj->server_fd = open("/dev/video100", O_RDWR | O_NONBLOCK);
-        if ((mm_obj->server_fd > 0) || (errno != EIO) || (n_try <= 0)) {
-            ALOGI("%s: server opened", __FUNCTION__);
+        mm_obj->server_fd = open(mm_daemon_server_find_subdev(
+                MSM_CONFIGURATION_NAME, QCAMERA_VNODE_GROUP_ID,
+                MEDIA_ENT_T_DEVNODE_V4L), O_RDWR | O_NONBLOCK);
+        if ((mm_obj->server_fd > 0) || (errno != EIO) || (n_try <= 0))
             break;
-        }
         usleep(10000);
     } while (n_try > 0);
 
     if (mm_obj->server_fd <= 0) {
-        ALOGE("%s: cannot open server device", __FUNCTION__);
+        ALOGE("%s: Failed to open server device", __FUNCTION__);
         rc = -1;
         goto server_error;
     }
 
-    mm_obj->ion_fd = open("/dev/ion", O_RDONLY);
-    pthread_mutex_init(&mm_obj->mutex, NULL);
-
-    rc = mm_daemon_evt_sub(mm_obj, 1);
+    rc = mm_daemon_subscribe(mm_obj, 1);
     if (rc < 0) {
         ALOGE("%s: event subscription error", __FUNCTION__);
         goto error;
@@ -763,43 +451,25 @@ int mm_daemon_open()
     rc = mm_daemon_poll_fn(mm_obj);
     if (rc < 0) {
         ALOGE("%s: poll error", __FUNCTION__);
-        goto poll_error;
+        goto error;
     }
 
-poll_error:
-    ALOGI("Shutting down");
-    mm_daemon_config_stop(mm_obj);
-#if 0
-    mm_daemon_config_unset_subdev(mm_obj, CSIC_DEV);
-#endif
-    mm_daemon_config_unset_subdev(mm_obj, VFE_DEV);
-    if (mm_obj->vfe_fd > 0) {
-        close(mm_obj->vfe_fd);
-        mm_obj->vfe_fd = 0;
-    }
-    if (mm_obj->cfg_fd > 0) {
-        close(mm_obj->cfg_fd);
-        mm_obj->cfg_fd = 0;
-    }
-socket_error:
-    unlink(sockaddr.sun_path);
-    close(sock);
 error:
-    pthread_mutex_destroy(&mm_obj->mutex);
-mctl_error:
     if (mm_obj->server_fd > 0) {
         close(mm_obj->server_fd);
         mm_obj->server_fd = 0;
     }
-    close(mm_obj->ion_fd);
 server_error:
+    pthread_mutex_destroy(&(mm_obj->mutex));
+    pthread_cond_destroy(&(mm_obj->cond));
+    pthread_mutex_destroy(&sd_lock);
+    pthread_mutex_destroy(&(mm_obj->cfg_lock));
     free(mm_obj);
 mem_error:
     return rc;
 }
 
-
-int main(int argc, char **argv)
+int main()
 {
     int rc;
     rc = mm_daemon_open();
