@@ -6,13 +6,15 @@ ifeq ($(TARGET_USE_MM_OPEN_DAEMON),true)
   MMDAEMON_FILES:=	\
 	mm_daemon.c	\
 	mm_daemon_config.c \
-	mm_daemon_sensor.c
+	mm_daemon_sensor.c \
+	mm_daemon_stats.c
 
   LOCAL_SRC_FILES := $(MMDAEMON_FILES)
 
   LOCAL_SHARED_LIBRARIES := \
 	libutils	\
-	libcutils
+	libcutils	\
+	libdl
 
   LOCAL_C_INCLUDES += \
 	hardware/qcom/camera/QCamera2/stack/common
@@ -26,4 +28,6 @@ ifeq ($(TARGET_USE_MM_OPEN_DAEMON),true)
   LOCAL_CFLAGS = -Wall -Werror
 
   include $(BUILD_EXECUTABLE)
+
+  include $(call all-makefiles-under,$(LOCAL_PATH))
 endif

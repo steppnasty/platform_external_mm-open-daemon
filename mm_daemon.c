@@ -26,8 +26,10 @@
 #include <cutils/properties.h>
 #include "mm_daemon.h"
 
+#define MM_CONFIG_NAME MSM_CONFIGURATION_NAME
+#define MM_CAMERA_NAME MSM_CAMERA_NAME
+
 static char subdev_name[32];
-static pthread_mutex_t sd_lock;
 
 static uint32_t msm_events[] = {
     MSM_CAMERA_NEW_SESSION,
@@ -65,181 +67,158 @@ static void mm_daemon_server_config_cmd(mm_daemon_obj_t *mm_obj, uint8_t cmd,
         ALOGI("%s: write error", __FUNCTION__);
 }
 
-char *mm_daemon_server_find_subdev(char *dev_name,
-        uint32_t group_id, uint32_t sd_type)
+static void mm_daemon_server_find_subdev(mm_daemon_sd_obj_t *sd)
 {
-    int dev_fd = 0;
-    int media_dev_num = 0;
+    unsigned int i;
     struct media_device_info dev_info;
 
-    pthread_mutex_lock(&sd_lock);
-    while (1) {
-        char media_dev_name[32];
-        snprintf(media_dev_name, sizeof(media_dev_name), "/dev/media%d",
-                media_dev_num);
-        dev_fd = open(media_dev_name, O_RDWR | O_NONBLOCK);
-        if (dev_fd < 0)
-            break;
-        media_dev_num++;
-        memset(&dev_info, 0, sizeof(dev_info));
-        if (ioctl(dev_fd, MEDIA_IOC_DEVICE_INFO, &dev_info) < 0) {
-            ALOGE("Error: Media dev info ioctl failed: %s", strerror(errno));
-            break;
-        }
+    struct daemon_subdevs {
+	char *dev_name;
+        uint32_t group_id;
+	uint32_t sd_type;
+    } subdevs[] = {
+        {MM_CAMERA_NAME, QCAMERA_VNODE_GROUP_ID, MEDIA_ENT_T_DEVNODE_V4L},
+        {MM_CONFIG_NAME, QCAMERA_VNODE_GROUP_ID, MEDIA_ENT_T_DEVNODE_V4L},
+        {MM_CONFIG_NAME, MSM_CAMERA_SUBDEV_VFE, MEDIA_ENT_T_V4L2_SUBDEV},
+        {MM_CONFIG_NAME, MSM_CAMERA_SUBDEV_SENSOR, MEDIA_ENT_T_V4L2_SUBDEV},
+        {MM_CONFIG_NAME, MSM_CAMERA_SUBDEV_BUF_MNGR, MEDIA_ENT_T_V4L2_SUBDEV},
+    };
 
-        if (strncmp(dev_info.model, dev_name, sizeof(dev_info.model)) != 0) {
-            close(dev_fd);
-            dev_fd = 0;
-            continue;
-        }
+    for (i = 0; i < ARRAY_SIZE(subdevs); i++) {
+        int dev_fd = 0;
+        int media_dev_num = 0;
+        char *dev_name = subdevs[i].dev_name;
+        uint32_t group_id = subdevs[i].group_id;
+        uint32_t sd_type = subdevs[i].sd_type;
 
-        int num_entities = 1;
         while (1) {
-            struct media_entity_desc entity;
-            memset(&entity, 0, sizeof(entity));
-            entity.id = num_entities++;
-            if (ioctl(dev_fd, MEDIA_IOC_ENUM_ENTITIES, &entity) < 0)
+            char media_dev_name[32];
+            snprintf(media_dev_name, sizeof(media_dev_name), "/dev/media%d",
+                    media_dev_num);
+            dev_fd = open(media_dev_name, O_RDWR | O_NONBLOCK);
+            if (dev_fd < 0)
                 break;
-            if (entity.group_id != group_id)
+            media_dev_num++;
+            memset(&dev_info, 0, sizeof(dev_info));
+            if (ioctl(dev_fd, MEDIA_IOC_DEVICE_INFO, &dev_info) < 0) {
+                ALOGE("Error: Media dev info ioctl failed: %s", strerror(errno));
+                break;
+            }
+
+            if (strncmp(dev_info.model, dev_name, sizeof(dev_info.model)) != 0) {
+                close(dev_fd);
+                dev_fd = 0;
                 continue;
-            if (entity.type == sd_type && entity.group_id == group_id) {
-                snprintf(subdev_name, sizeof(subdev_name), "/dev/%s", entity.name);
-                break;
+            }
+
+            int num_entities = 1;
+            while (1) {
+                struct media_entity_desc entity;
+                memset(&entity, 0, sizeof(entity));
+                entity.id = num_entities++;
+                if (ioctl(dev_fd, MEDIA_IOC_ENUM_ENTITIES, &entity) < 0)
+                    break;
+                if (entity.group_id != group_id)
+                    continue;
+                if (entity.type == sd_type && entity.group_id == group_id) {
+                    snprintf(subdev_name, sizeof(subdev_name), "/dev/%s",
+                            entity.name);
+                    switch (group_id) {
+                        case QCAMERA_VNODE_GROUP_ID:
+                            if (strncmp(dev_info.model, MM_CAMERA_NAME,
+                                    sizeof(dev_info.model)) == 0) {
+                                if (sd->num_cameras < MSM_MAX_CAMERA_SENSORS) {
+                                    snprintf(sd->camera_sd[sd->num_cameras].devpath,
+                                            sizeof(subdev_name), "%s", subdev_name);
+                                    sd->num_cameras++;
+                                }
+                            } else if (strncmp(dev_info.model, MM_CONFIG_NAME,
+                                    sizeof(dev_info.model)) == 0) {
+                                snprintf(sd->msm_sd.devpath,
+                                        sizeof(subdev_name), "%s", subdev_name);
+                            }
+                            break;
+                        case MSM_CAMERA_SUBDEV_VFE:
+                            snprintf(sd->vfe_sd.devpath, sizeof(subdev_name),
+                                    "%s", subdev_name);
+                            break;
+                        case MSM_CAMERA_SUBDEV_SENSOR:
+                            if (sd->num_sensors < MSM_MAX_CAMERA_SENSORS) {
+                                snprintf(sd->sensor_sd[sd->num_sensors].devpath,
+                                        sizeof(subdev_name), "%s", subdev_name);
+                                sd->num_sensors++;
+                            }
+                            break;
+                        case MSM_CAMERA_SUBDEV_BUF_MNGR:
+                            snprintf(sd->buf_sd.devpath, sizeof(subdev_name),
+                                    "%s", subdev_name);
+                            break;
+                        default:
+                            break;
+                    }
+                }
             }
         }
-        break;
+        if (dev_fd > 0)
+            close(dev_fd);
+        dev_fd = 0;
     }
-    if (dev_fd > 0)
-        close(dev_fd);
-    dev_fd = 0;
-    pthread_mutex_unlock(&sd_lock);
-    return subdev_name;
 }
 
-static void mm_daemon_parm(mm_daemon_obj_t *mm_obj)
+static int mm_daemon_server_get_sinfo(mm_daemon_sd_obj_t *sd)
 {
-    int next = 1;
-    int current, position;
-    parm_buffer_t *p_table;
+    int i;
 
-    p_table = mm_obj->parm_buf.buf;
-    current = GET_FIRST_PARAM_ID(p_table);
-    position = current;
-    while (next) {
-        switch (position) {
-            case CAM_INTF_PARM_HAL_VERSION: {
-                int32_t hal_version;
-                memcpy(&hal_version, POINTER_OF(current, p_table), sizeof(hal_version));
-                break;
-            }
-            case CAM_INTF_PARM_ANTIBANDING: {
-                int32_t value;
-                memcpy(&value, POINTER_OF(current, p_table), sizeof(value));
-                break;
-            }
-            case CAM_INTF_PARM_SET_PP_COMMAND: {
-                tune_cmd_t pp_cmd;
-                memcpy(&pp_cmd, POINTER_OF(current, p_table), sizeof(pp_cmd));
-                break;
-            }
-            case CAM_INTF_PARM_TINTLESS: {
-                int32_t value;
-                memcpy(&value, POINTER_OF(current, p_table), sizeof(value));
-                break;
-            }
-            default:
-                next = 0;
-                break;
+    for (i = 0; i < sd->num_sensors; i++) {
+        int cam_fd;
+        struct sensorb_cfg_data cdata;
+        mm_daemon_subdev *subdev = &sd->sensor_sd[i];
+
+        cam_fd = open(subdev->devpath, O_RDWR | O_NONBLOCK);
+        if (cam_fd < 0)
+            return -ENODEV;
+        cdata.cfgtype = CFG_GET_SENSOR_INFO;
+        if (ioctl(cam_fd, VIDIOC_MSM_SENSOR_CFG, &cdata) < 0) {
+            close(cam_fd);
+            return -ENODEV;
         }
-        position = GET_NEXT_PARAM_ID(current, p_table);
-        if (position == 0 || position == current)
-            next = 0;
-        else
-            current = position;
+        snprintf(subdev->devname, sizeof(subdev->devname), "%s",
+                cdata.cfg.sensor_info.sensor_name);
+        close(cam_fd);
+    }
+    return 1;
+}
+
+static void mm_daemon_server_load_sensor(mm_daemon_sd_obj_t *sd)
+{
+    int i;
+
+    for (i = 0; i < sd->num_sensors; i++) {
+        char path[PATH_MAX];
+        void *handle;
+        const char *sym = "sensor_cfg_obj";
+
+        snprintf(path, PATH_MAX, "/system/lib/libmmdaemon_%s.so",
+                sd->sensor_sd[i].devname);
+        handle = dlopen(path, RTLD_NOW);
+        if (handle == NULL) {
+            char const *err_str = dlerror();
+            ALOGE("Error loading %s: %s", path, err_str?err_str:"unknown");
+            break;
+        }
+        sd->sensor_sd[i].handle = handle;
+
+        sd->sensor_sd[i].data = dlsym(handle, sym);
     }
 }
 
-static void mm_daemon_capability_fill(mm_daemon_obj_t *mm_obj)
-{
-    cam_capability_t mm_cap;
-
-    memset(&mm_cap, 0, sizeof(cam_capability_t));
-    mm_cap.picture_sizes_tbl[0].width = 2592;
-    mm_cap.picture_sizes_tbl[0].height = 1952;
-    mm_cap.picture_sizes_tbl[1].width = 2592;
-    mm_cap.picture_sizes_tbl[1].height = 1936;
-    mm_cap.picture_sizes_tbl[2].width = 2592;
-    mm_cap.picture_sizes_tbl[2].height = 1456;
-    mm_cap.picture_sizes_tbl_cnt = 3;
-
-    mm_cap.preview_sizes_tbl_cnt = 2;
-    mm_cap.preview_sizes_tbl[0].width = 1280;
-    mm_cap.preview_sizes_tbl[0].height = 720;
-    mm_cap.preview_sizes_tbl[1].width = 640;
-    mm_cap.preview_sizes_tbl[1].height = 480;
-
-    mm_cap.video_sizes_tbl_cnt = 2;
-    mm_cap.video_sizes_tbl[0].width = 1280;
-    mm_cap.video_sizes_tbl[0].height = 720;
-    mm_cap.video_sizes_tbl[1].width = 640;
-    mm_cap.video_sizes_tbl[1].height = 480;
-
-    mm_cap.scale_picture_sizes_cnt = 4;
-    mm_cap.scale_picture_sizes[0].width = 640;
-    mm_cap.scale_picture_sizes[0].height = 480;
-    mm_cap.scale_picture_sizes[1].width = 512;
-    mm_cap.scale_picture_sizes[1].height = 384;
-    mm_cap.scale_picture_sizes[2].width = 384;
-    mm_cap.scale_picture_sizes[2].height = 288;
-    mm_cap.scale_picture_sizes[3].width = 0;
-    mm_cap.scale_picture_sizes[3].height = 0;
-    
-
-    mm_cap.supported_focus_modes_cnt = 1;
-    mm_cap.supported_focus_modes[0] = CAM_FOCUS_MODE_FIXED;
-
-    mm_cap.supported_preview_fmt_cnt = 4;
-    mm_cap.supported_preview_fmts[0] = CAM_FORMAT_YUV_420_NV12;
-    mm_cap.supported_preview_fmts[1] = CAM_FORMAT_YUV_420_NV21;
-    mm_cap.supported_preview_fmts[2] = CAM_FORMAT_YUV_420_NV21_ADRENO;
-    mm_cap.supported_preview_fmts[3] = CAM_FORMAT_YUV_420_YV12;
-
-    mm_cap.zoom_supported = 1;
-    mm_cap.zoom_ratio_tbl_cnt = 2;
-    mm_cap.zoom_ratio_tbl[0] = 1;
-    mm_cap.zoom_ratio_tbl[1] = 2;
-
-    mm_cap.focal_length = 3.53;
-
-    mm_cap.supported_iso_modes[0] = CAM_ISO_MODE_AUTO;
-    mm_cap.supported_iso_modes[1] = CAM_ISO_MODE_DEBLUR;
-    mm_cap.supported_iso_modes[2] = CAM_ISO_MODE_100;
-    mm_cap.supported_iso_modes[3] = CAM_ISO_MODE_200;
-    mm_cap.supported_iso_modes[4] = CAM_ISO_MODE_400;
-    mm_cap.supported_iso_modes[5] = CAM_ISO_MODE_800;
-    mm_cap.supported_iso_modes_cnt = 6;
-
-    mm_cap.supported_flash_modes[0] = CAM_FLASH_MODE_OFF;
-    mm_cap.supported_flash_modes[1] = CAM_FLASH_MODE_AUTO;
-    mm_cap.supported_flash_modes[2] = CAM_FLASH_MODE_ON;
-    mm_cap.supported_flash_modes[3] = CAM_FLASH_MODE_TORCH;
-    mm_cap.supported_flash_modes_cnt = 4;
-
-    mm_cap.fps_ranges_tbl[0].min_fps = 9.0;
-    mm_cap.fps_ranges_tbl[0].max_fps = 29.453;
-    mm_cap.fps_ranges_tbl_cnt = 1;
-
-    mm_cap.sensor_mount_angle = 90;
-
-    memcpy(mm_obj->cap_buf.vaddr, &mm_cap, sizeof(mm_cap));
-}
-
-static void mm_daemon_notify(mm_daemon_obj_t *mm_obj)
+static void mm_daemon_notify(mm_daemon_sd_obj_t *sd)
 {
     struct v4l2_event ev;
     struct v4l2_event new_ev;
     struct msm_v4l2_event_data *msm_evt = NULL;
     unsigned int status = MSM_CAMERA_ERR_CMD_FAIL;
+    mm_daemon_obj_t *mm_obj = sd->mm_obj;
 
     memset(&ev, 0, sizeof(ev));
     memset(&new_ev, 0, sizeof(new_ev));
@@ -266,7 +245,7 @@ static void mm_daemon_notify(mm_daemon_obj_t *mm_obj)
             mm_obj->session_id = msm_evt->session_id;
             mm_obj->stream_id = msm_evt->stream_id;
             pthread_mutex_lock(&mm_obj->mutex);
-            mm_daemon_config_open(mm_obj);
+            mm_daemon_config_open(sd);
             pthread_cond_wait(&mm_obj->cond, &mm_obj->mutex);
             pthread_mutex_unlock(&mm_obj->mutex);
             status = MSM_CAMERA_CMD_SUCESS;
@@ -299,8 +278,8 @@ static void mm_daemon_notify(mm_daemon_obj_t *mm_obj)
                                 msm_evt->stream_id);
                     break;
                 case CAM_PRIV_PARM:
-                    if (mm_obj->parm_buf.mapped)
-                        mm_daemon_parm(mm_obj);
+                    mm_daemon_server_config_cmd(mm_obj, CFG_CMD_PARM,
+                            msm_evt->stream_id);
                     break;
                 case MSM_CAMERA_PRIV_S_FMT:
                 case MSM_CAMERA_PRIV_SHUTDOWN:
@@ -318,7 +297,6 @@ static void mm_daemon_notify(mm_daemon_obj_t *mm_obj)
             switch (msm_evt->command) {
                 case MSM_CAMERA_PRIV_QUERY_CAP:
                     if (mm_obj->cap_buf.mapped) {
-                        mm_daemon_capability_fill(mm_obj);
                         status = MSM_CAMERA_CMD_SUCESS;
                     } else
                         ALOGE("%s: Error: Capability buffer not mapped",
@@ -336,7 +314,7 @@ cmd_ack:
     ioctl(mm_obj->server_fd, MSM_CAM_V4L2_IOCTL_CMD_ACK, &new_ev);
 }
 
-int mm_daemon_server_pipe_cmd(mm_daemon_obj_t *mm_obj)
+static int mm_daemon_server_pipe_cmd(mm_daemon_obj_t *mm_obj)
 {
     int rc = 0;
     ssize_t read_len;
@@ -357,10 +335,11 @@ int mm_daemon_server_pipe_cmd(mm_daemon_obj_t *mm_obj)
     return rc;
 }
 
-int mm_daemon_poll_fn(mm_daemon_obj_t *mm_obj)
+static int mm_daemon_poll_fn(mm_daemon_sd_obj_t *sd)
 {
     int rc = 0, i;
     struct pollfd fds[2];
+    mm_daemon_obj_t *mm_obj = sd->mm_obj;
 
     pipe(mm_obj->svr_pfds);
     mm_obj->state = STATE_POLL;
@@ -373,7 +352,7 @@ int mm_daemon_poll_fn(mm_daemon_obj_t *mm_obj)
         if (rc > 0) {
             if ((fds[0].revents & POLLIN) &&
                     (fds[0].revents & POLLRDNORM))
-                mm_daemon_notify(mm_obj);
+                mm_daemon_notify(sd);
             else if ((fds[1].revents & POLLIN) &&
                     (fds[1].revents & POLLRDNORM))
                 mm_daemon_server_pipe_cmd(mm_obj);
@@ -407,30 +386,44 @@ static int mm_daemon_subscribe(mm_daemon_obj_t *mm_obj, int subscribe)
     return rc;
 }
 
-int mm_daemon_open()
+static int mm_daemon_open()
 {
     int rc = 0;
     int n_try = 2;
     mm_daemon_obj_t *mm_obj;
+    mm_daemon_sd_obj_t *sd;
 
-    mm_obj = (mm_daemon_obj_t *)malloc(sizeof(mm_daemon_obj_t));
+    mm_obj = (mm_daemon_obj_t *)calloc(1, sizeof(mm_daemon_obj_t));
     if (mm_obj == NULL) {
         rc = -1;
         goto mem_error;
     }
-    memset(mm_obj, 0, sizeof(mm_daemon_obj_t));
 
-    pthread_mutex_init(&sd_lock, NULL);
+    sd = (mm_daemon_sd_obj_t *)calloc(1, sizeof(mm_daemon_sd_obj_t));
+    if (sd == NULL) {
+        rc = -1;
+        goto tdata_error;
+    }
+
+    sd->mm_obj = mm_obj;
+
     pthread_mutex_init(&(mm_obj->mutex), NULL);
     pthread_mutex_init(&(mm_obj->cfg_lock), NULL);
     pthread_cond_init(&(mm_obj->cond), NULL);
 
+    mm_daemon_server_find_subdev(sd);
+
+    if (!(mm_daemon_server_get_sinfo(sd))) {
+        ALOGE("Error: failed to extract sensor info");
+        goto server_error;
+    }
+
+    mm_daemon_server_load_sensor(sd);
+
     /* Open the server device */
     do {
         n_try--;
-        mm_obj->server_fd = open(mm_daemon_server_find_subdev(
-                MSM_CONFIGURATION_NAME, QCAMERA_VNODE_GROUP_ID,
-                MEDIA_ENT_T_DEVNODE_V4L), O_RDWR | O_NONBLOCK);
+        mm_obj->server_fd = open(sd->msm_sd.devpath, O_RDWR | O_NONBLOCK);
         if ((mm_obj->server_fd > 0) || (errno != EIO) || (n_try <= 0))
             break;
         usleep(10000);
@@ -448,7 +441,7 @@ int mm_daemon_open()
         goto error;
     }
 
-    rc = mm_daemon_poll_fn(mm_obj);
+    rc = mm_daemon_poll_fn(sd);
     if (rc < 0) {
         ALOGE("%s: poll error", __FUNCTION__);
         goto error;
@@ -462,8 +455,9 @@ error:
 server_error:
     pthread_mutex_destroy(&(mm_obj->mutex));
     pthread_cond_destroy(&(mm_obj->cond));
-    pthread_mutex_destroy(&sd_lock);
     pthread_mutex_destroy(&(mm_obj->cfg_lock));
+    free(sd);
+tdata_error:
     free(mm_obj);
 mem_error:
     return rc;

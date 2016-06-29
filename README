@@ -1,0 +1,21 @@
+README for mm-open-daemon - June 28, 2016.
+
+This program is intended as a open source substitute for mm-qcamera-daemon.
+
+
+Software Requirements:
+======================
+Camera2 kernel driver --  Tested with CAF branch jb_mr1_rb4.19
+HAL1/QCamera2 -- Tested with CAF branch jb_mr1_rb4.19
+
+
+Supported Hardware:
+===================
+Video Front End:
+----------------
+VFE 3.1
+
+Sensor Models:
+--------------
+S5K4E1GX
+MT9V113

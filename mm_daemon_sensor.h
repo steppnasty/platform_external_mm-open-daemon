@@ -24,6 +24,7 @@
 #define MM_DAEMON_SENSOR_H
 
 #include "mm_daemon.h"
+#include "sensors/mm_sensor.h"
 
 #define DEFAULT_EXP_GAIN 0x20
 
@@ -32,6 +33,13 @@ typedef enum {
     SENSOR_CMD_SNAPSHOT,
     SENSOR_CMD_GAIN_UPDATE,
     SENSOR_CMD_EXP_GAIN,
+    SENSOR_CMD_AB,
+    SENSOR_CMD_WB,
+    SENSOR_CMD_BRIGHTNESS,
+    SENSOR_CMD_SATURATION,
+    SENSOR_CMD_CONTRAST,
+    SENSOR_CMD_EFFECT,
+    SENSOR_CMD_SHARPNESS,
     SENSOR_CMD_POWER_UP,
     SENSOR_CMD_SHUTDOWN,
 } mm_daemon_sensor_cmd_t;
@@ -42,18 +50,14 @@ typedef enum {
 } mm_daemon_sensor_state_t;
 
 typedef struct mm_daemon_sensor {
-    pthread_t pid;
-    pthread_mutex_t lock;
-    pthread_cond_t cond;
     int cam_fd;
-    int32_t pfds[2];
+    uint16_t lines;
     mm_daemon_cfg_t *cfg_obj;
-    uint8_t curr_stream;
-    uint16_t curr_gain;
+    mm_daemon_thread_info *info;
     mm_daemon_sensor_state_t sensor_state;
-    mm_daemon_state_type_t state;
+    mm_sensor_cfg_t *cfg;
 } mm_daemon_sensor_t;
 
-mm_daemon_sensor_t *mm_daemon_sensor_open();
-int mm_daemon_sensor_close(mm_daemon_sensor_t *mm_snsr);
+int mm_daemon_sensor_open(mm_daemon_thread_info *info);
+int mm_daemon_sensor_close(mm_daemon_thread_info *info);
 #endif
