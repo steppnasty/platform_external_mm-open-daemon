@@ -17,3 +17,10 @@ LOCAL_SRC_FILES := mm_daemon_sensor_mt9v113.c
 LOCAL_C_INCLUDES := $(mm_sensor_includes)
 LOCAL_MODULE_TAGS := optional
 include $(BUILD_SHARED_LIBRARY)
+
+include $(CLEAR_VARS)
+LOCAL_MODULE := libmmdaemon_imx105
+LOCAL_SRC_FILES := mm_daemon_sensor_imx105.c
+LOCAL_C_INCLUDES := $(mm_sensor_includes)
+LOCAL_MODULE_TAGS := optional
+include $(BUILD_SHARED_LIBRARY)
