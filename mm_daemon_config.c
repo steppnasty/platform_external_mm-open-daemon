@@ -1,5 +1,5 @@
 /*
-   Copyright (C) 2016 Brian Stepp 
+   Copyright (C) 2016-2017 Brian Stepp 
       steppnasty@gmail.com
 
    This program is free software; you can redistribute it and/or
@@ -26,6 +26,9 @@
 #include "mm_daemon.h"
 #include "mm_daemon_stats.h"
 #include "mm_daemon_sensor.h"
+#include "mm_daemon_sock.h"
+#include "mm_daemon_csi.h"
+#include "mm_daemon_util.h"
 
 static uint32_t isp_events[] = {
     ISP_EVENT_REG_UPDATE,
@@ -94,12 +97,12 @@ static uint32_t mm_daemon_config_v4l2_fmt(cam_format_t fmt)
     return val;
 }
 
-static void mm_daemon_config_send_config_cmd(int32_t pfd, uint8_t cmd,
-        int32_t val)
+static void mm_daemon_config_server_cmd(int32_t pfd, uint8_t cmd, int32_t val)
 {
     int len;
     mm_daemon_pipe_evt_t pipe_cmd;
 
+    memset(&pipe_cmd, 0, sizeof(pipe_cmd));
     pipe_cmd.cmd = cmd;
     pipe_cmd.val = val;
     len = write(pfd, &pipe_cmd, sizeof(pipe_cmd));
@@ -107,36 +110,22 @@ static void mm_daemon_config_send_config_cmd(int32_t pfd, uint8_t cmd,
         ALOGI("%s: write error", __FUNCTION__);
 }
 
-static void mm_daemon_config_server_cmd(mm_daemon_obj_t *mm_obj, uint8_t cmd,
-        int stream_id)
-{
-    int len;
-    mm_daemon_pipe_evt_t pipe_cmd;
-
-    memset(&pipe_cmd, 0, sizeof(pipe_cmd));
-    pipe_cmd.cmd = cmd;
-    pipe_cmd.val = stream_id;
-    len = write(mm_obj->svr_pfds[1], &pipe_cmd, sizeof(pipe_cmd));
-    if (len < 1)
-        ALOGI("%s: write error", __FUNCTION__);
-}
-
-static void mm_daemon_config_sensor_cmd(mm_daemon_thread_info *snsr,
+static void mm_daemon_config_sensor_cmd(mm_daemon_thread_info *info,
         uint8_t cmd, int32_t val, int wait)
 {
     int len;
     mm_daemon_pipe_evt_t pipe_cmd;
 
-    pthread_mutex_lock(&snsr->lock);
+    pthread_mutex_lock(&info->lock);
     memset(&pipe_cmd, 0, sizeof(pipe_cmd));
     pipe_cmd.cmd = cmd;
     pipe_cmd.val = val;
-    len = write(snsr->pfds[1], &pipe_cmd, sizeof(pipe_cmd));
+    len = write(info->pfds[1], &pipe_cmd, sizeof(pipe_cmd));
     if (len < 1)
         ALOGI("%s: write error", __FUNCTION__);
     if (wait)
-        pthread_cond_wait(&snsr->cond, &snsr->lock);
-    pthread_mutex_unlock(&snsr->lock);
+        pthread_cond_wait(&info->cond, &info->lock);
+    pthread_mutex_unlock(&info->lock);
 }
 
 static void mm_daemon_config_stats_cmd(mm_daemon_stats_t *mm_stats,
@@ -151,6 +140,20 @@ static void mm_daemon_config_stats_cmd(mm_daemon_stats_t *mm_stats,
     len = write(mm_stats->pfds[1], &pipe_cmd, sizeof(pipe_cmd));
     if (len < 1)
         ALOGI("%s: write error", __FUNCTION__);
+}
+
+static void mm_daemon_config_csi_cmd(mm_daemon_thread_info *info,
+	uint8_t cmd, int32_t val)
+{
+    int len;
+    mm_daemon_pipe_evt_t pipe_cmd;
+
+    memset(&pipe_cmd, 0, sizeof(pipe_cmd));
+    pipe_cmd.cmd = cmd;
+    pipe_cmd.val = val;
+    len = write(info->pfds[1], &pipe_cmd, sizeof(pipe_cmd));
+    if (len < 1)
+        ALOGE("%s: write error", __FUNCTION__);
 }
 
 static void mm_daemon_config_parm(mm_daemon_cfg_t *cfg_obj)
@@ -179,7 +182,7 @@ static void mm_daemon_config_parm(mm_daemon_cfg_t *cfg_obj)
                 if (*cvalue != *pvalue) {
                     memcpy(cvalue, pvalue, sizeof(int32_t));
                     if (cfg_obj->sdata->uses_sensor_ctrls)
-                        mm_daemon_config_sensor_cmd(cfg_obj->snsr,
+                        mm_daemon_config_sensor_cmd(cfg_obj->info[SNSR_DEV],
                                 SENSOR_CMD_AB, *cvalue, 0);
                 }
                 break;
@@ -221,7 +224,7 @@ static void mm_daemon_config_parm(mm_daemon_cfg_t *cfg_obj)
                 if (*cvalue != *pvalue) {
                     memcpy(cvalue, pvalue, sizeof(int32_t));
                     if (cfg_obj->sdata->uses_sensor_ctrls)
-                        mm_daemon_config_sensor_cmd(cfg_obj->snsr,
+                        mm_daemon_config_sensor_cmd(cfg_obj->info[SNSR_DEV],
                                 SENSOR_CMD_WB, *cvalue, 0);
                     else if (cfg_obj->vfe_started)
                         cfg_obj->wb_changed = 1;
@@ -234,7 +237,7 @@ static void mm_daemon_config_parm(mm_daemon_cfg_t *cfg_obj)
                 if (*cvalue != *pvalue) {
                     memcpy(cvalue, pvalue, sizeof(int32_t));
                     if (cfg_obj->sdata->uses_sensor_ctrls)
-                        mm_daemon_config_sensor_cmd(cfg_obj->snsr,
+                        mm_daemon_config_sensor_cmd(cfg_obj->info[SNSR_DEV],
                                 SENSOR_CMD_EFFECT, *cvalue, 0);
                 }
                 break;
@@ -266,7 +269,7 @@ static void mm_daemon_config_parm(mm_daemon_cfg_t *cfg_obj)
                 if (*cvalue != *pvalue) {
                     memcpy(cvalue, pvalue, sizeof(int32_t));
                     if (cfg_obj->sdata->uses_sensor_ctrls)
-                        mm_daemon_config_sensor_cmd(cfg_obj->snsr,
+                        mm_daemon_config_sensor_cmd(cfg_obj->info[SNSR_DEV],
                                 SENSOR_CMD_SHARPNESS, *cvalue, 0);
                 }
                 break;
@@ -277,7 +280,7 @@ static void mm_daemon_config_parm(mm_daemon_cfg_t *cfg_obj)
                 if (*cvalue != *pvalue) {
                     memcpy(cvalue, pvalue, sizeof(int32_t));
                     if (cfg_obj->sdata->uses_sensor_ctrls)
-                        mm_daemon_config_sensor_cmd(cfg_obj->snsr,
+                        mm_daemon_config_sensor_cmd(cfg_obj->info[SNSR_DEV],
                                 SENSOR_CMD_CONTRAST, *cvalue, 0);
                 }
                 break;
@@ -288,7 +291,7 @@ static void mm_daemon_config_parm(mm_daemon_cfg_t *cfg_obj)
                 if (*cvalue != *pvalue) {
                     memcpy(cvalue, pvalue, sizeof(int32_t));
                     if (cfg_obj->sdata->uses_sensor_ctrls)
-                        mm_daemon_config_sensor_cmd(cfg_obj->snsr,
+                        mm_daemon_config_sensor_cmd(cfg_obj->info[SNSR_DEV],
                                 SENSOR_CMD_SATURATION, *cvalue, 0);
                 }
                 break;
@@ -299,7 +302,7 @@ static void mm_daemon_config_parm(mm_daemon_cfg_t *cfg_obj)
                 if (*cvalue != *pvalue) {
                     memcpy(cvalue, pvalue, sizeof(int32_t));
                     if (cfg_obj->sdata->uses_sensor_ctrls)
-                        mm_daemon_config_sensor_cmd(cfg_obj->snsr,
+                        mm_daemon_config_sensor_cmd(cfg_obj->info[SNSR_DEV],
                                 SENSOR_CMD_BRIGHTNESS, *cvalue, 0);
                 }
                 break;
@@ -532,7 +535,7 @@ static int mm_daemon_config_isp_input_cfg(mm_daemon_cfg_t *cfg_obj)
 
     memset(&input_cfg, 0, sizeof(input_cfg));
     input_cfg.input_src = VFE_PIX_0;
-    input_cfg.input_pix_clk = 122880000;
+    input_cfg.input_pix_clk = cfg_obj->sdata->vfe_clk_rate;
     input_cfg.d.pix_cfg.camif_cfg.pixels_per_line = 640;
     input_cfg.d.pix_cfg.input_format = V4L2_PIX_FMT_NV21;
     rc = ioctl(cfg_obj->vfe_fd, VIDIOC_MSM_ISP_INPUT_CFG, &input_cfg);
@@ -1001,6 +1004,7 @@ static int mm_daemon_config_vfe_roll_off(mm_daemon_cfg_t *cfg_obj,
         cam_stream_type_t stream_type)
 {
     int rc = 0;
+    struct mm_sensor_stream_attr *sattr;
     uint32_t *rocfg, *p;
     struct msm_vfe_reg_cfg_cmd reg_cfg_cmd[] = {
         {
@@ -1036,16 +1040,18 @@ static int mm_daemon_config_vfe_roll_off(mm_daemon_cfg_t *cfg_obj,
                 
     };
 
-    if (cfg_obj->sdata->uses_sensor_ctrls)
+    if (stream_type == CAM_STREAM_TYPE_SNAPSHOT)
+        sattr = cfg_obj->sdata->attr[SNAPSHOT];
+    else
+        sattr = cfg_obj->sdata->attr[PREVIEW];
+
+    if (!sattr || !sattr->ro_cfg)
         return 0;
 
     rocfg = (uint32_t *)malloc(1800);
     p = rocfg;
-    if (stream_type == CAM_STREAM_TYPE_SNAPSHOT)
-        *p++ = 0xC4A251;
-    else
-        *p++ = 0x18C5028;
 
+    *p++ = sattr->ro_cfg;
     *p++ = 0x0;
     *p++ = 0x0;
     *p++ = 0x0;
@@ -1509,7 +1515,7 @@ static int mm_daemon_config_vfe_fov(mm_daemon_cfg_t *cfg_obj,
         cam_stream_type_t stream_type)
 {
     int rc = 0;
-    struct mm_sensor_attr *sattr;
+    struct mm_sensor_stream_attr *sattr;
     uint32_t pix_offset;
     float hal_aspect;
     uint32_t fov_w, fov_h;
@@ -1537,6 +1543,8 @@ static int mm_daemon_config_vfe_fov(mm_daemon_cfg_t *cfg_obj,
         sattr = cfg_obj->sdata->attr[SNAPSHOT];
     else
         sattr = cfg_obj->sdata->attr[PREVIEW];
+    if (!sattr)
+        return -EINVAL;
 
     fov_w = sattr->w - sattr->blk_l;
     reg_w = fov_w - 1;
@@ -1575,7 +1583,7 @@ static int mm_daemon_config_vfe_main_scaler(mm_daemon_cfg_t *cfg_obj,
         cam_stream_type_t stream_type)
 {
     int rc = 0;
-    struct mm_sensor_attr *sattr;
+    struct mm_sensor_stream_attr *sattr;
     cam_dimension_t dim;
     mm_daemon_buf_info *buf;
     uint32_t reg_w, reg_h;
@@ -2124,20 +2132,32 @@ static int mm_daemon_config_vfe_camif(mm_daemon_cfg_t *cfg_obj,
         cam_stream_type_t stream_type)
 {
     int rc = 0;
-    struct mm_sensor_attr *sattr;
-    uint32_t camif_width;
+    struct mm_sensor_stream_attr *sattr;
+    uint32_t camif_width, camif_type;
     cam_dimension_t dim;
     mm_daemon_buf_info *buf;
     uint32_t *camif_cfg, *p;
     struct msm_vfe_reg_cfg_cmd reg_cfg_cmd[] = {
         {
             .u.rw_info = {
-                .reg_offset = 0x1e4,
+                .reg_offset = 0x1E4,
                 .len = 32,
             },
             .cmd_type = VFE_WRITE,
         },
     };
+
+    if (cfg_obj->info[CSI_DEV])
+        switch (cfg_obj->info[CSI_DEV]->type) {
+        case MM_CSIC:
+            camif_type = 0x40;
+            break;
+        default:
+            ALOGE("%s: Unsupported camif type", __FUNCTION__);
+            return -EINVAL;
+            break;
+    } else
+        camif_type = 0x100;
 
     buf = mm_daemon_get_stream_buf(cfg_obj, stream_type);
     if (!buf)
@@ -2156,7 +2176,7 @@ static int mm_daemon_config_vfe_camif(mm_daemon_cfg_t *cfg_obj,
 
     camif_cfg = (uint32_t *)malloc(32);
     p = camif_cfg;
-    *p++ = 0x100;
+    *p++ = camif_type;
     *p++ = 0x00;
     *p++ = (sattr->h << 16) | camif_width;
     *p++ = camif_width - 1;
@@ -2176,7 +2196,7 @@ static int mm_daemon_config_vfe_demux(mm_daemon_cfg_t *cfg_obj,
 {
     int rc = 0;
     int32_t *wb_parm;
-    struct mm_sensor_attr *sattr;
+    struct mm_sensor_stream_attr *sattr;
     mm_daemon_buf_info *buf;
     cam_dimension_t dim;
     uint32_t *demux_cfg, *p;
@@ -2203,13 +2223,13 @@ static int mm_daemon_config_vfe_demux(mm_daemon_cfg_t *cfg_obj,
     demux_cfg = (uint32_t *)malloc(20);
     p = demux_cfg;
     wb1 = wb2 = 0x800080;
-    if (cfg_obj->sdata->uses_sensor_ctrls) {
+    if (!cfg_obj->sdata->vfe_dmux_cfg) {
         *p++ = 0x3;
         dmx1 = dmx2 = 0x9CAC;
     } else {
         *p++ = 0x1;
-        dmx1 = 0x9C;
-        dmx2 = 0xCA;
+        dmx1 = ((cfg_obj->sdata->vfe_dmux_cfg & 0xFF00) >> 8);
+        dmx2 = (cfg_obj->sdata->vfe_dmux_cfg & 0x00FF);
         if (stream_type == CAM_STREAM_TYPE_SNAPSHOT) {
             wb_parm = (int32_t *)POINTER_OF(CAM_INTF_PARM_WHITE_BALANCE,
                     cfg_obj->parm_buf.cfg_buf);
@@ -2399,13 +2419,12 @@ static int mm_daemon_config_vfe_module(mm_daemon_cfg_t *cfg_obj)
 
     return mm_daemon_config_vfe_reg_cmd(cfg_obj, 4, (void *)&module_cfg,
             (void *)&reg_cfg_cmd, ARRAY_SIZE(reg_cfg_cmd));
-
 }
 
 static int mm_daemon_config_vfe_op_mode(mm_daemon_cfg_t *cfg_obj)
 {
     int rc = 0;
-    uint32_t *op_cfg, *p;
+    uint32_t *op_cfg, *p, vfe_cfg_off;
     struct msm_vfe_reg_cfg_cmd reg_cfg_cmd[] = {
         {
             .u.rw_info = {
@@ -2440,9 +2459,14 @@ static int mm_daemon_config_vfe_op_mode(mm_daemon_cfg_t *cfg_obj)
         },
     };
 
+    if (cfg_obj->info[CSI_DEV])
+        vfe_cfg_off = cfg_obj->sdata->vfe_cfg_off + 0x30;
+    else
+        vfe_cfg_off = cfg_obj->sdata->vfe_cfg_off;
+
     op_cfg = (uint32_t *)malloc(16);
     p = op_cfg;
-    *p++ = 0x211;
+    *p++ = vfe_cfg_off;
     *p++ = 0x0;
     *p++ = 0x0;
     *p = cfg_obj->sdata->stats_enable;
@@ -2602,6 +2626,24 @@ static int mm_daemon_config_vfe_mce(mm_daemon_cfg_t *cfg_obj)
             (void *)&reg_cfg_cmd, ARRAY_SIZE(reg_cfg_cmd));
     free(mce_cfg);
     return rc;
+}
+
+static int mm_daemon_config_vfe_reg(mm_daemon_cfg_t *cfg_obj,
+        uint32_t regaddr, uint32_t value)
+{
+    uint32_t reg_cfg = value;
+    struct msm_vfe_reg_cfg_cmd reg_cfg_cmd[] = {
+        {
+            .u.rw_info = {
+                .reg_offset = regaddr,
+                .len = 4,
+            },
+            .cmd_type = VFE_WRITE,
+        },
+    };
+
+    return mm_daemon_config_vfe_reg_cmd(cfg_obj, 4, (void *)&reg_cfg,
+            (void *)reg_cfg_cmd, ARRAY_SIZE(reg_cfg_cmd));
 }
 
 static void mm_daemon_config_stats_stream_request(mm_daemon_cfg_t *cfg_obj)
@@ -2900,37 +2942,6 @@ static void mm_daemon_config_stats_stop(mm_daemon_cfg_t *cfg_obj)
     cfg_obj->stats_started = 0;
 }
 
-static void mm_daemon_config_stats_init(mm_daemon_cfg_t *cfg_obj)
-{
-    size_t i;
-
-    for (i = 0; i < ARRAY_SIZE(vfe_stats); i++) {
-        mm_daemon_stats_open(cfg_obj, vfe_stats[i]); 
-    }
-    mm_daemon_config_stats_buf_request(cfg_obj);
-    mm_daemon_config_stats_buf_alloc(cfg_obj);
-    mm_daemon_config_stats_buf_enqueue(cfg_obj);
-}
-
-static void mm_daemon_config_stats_deinit(mm_daemon_cfg_t *cfg_obj)
-{
-    size_t i;
-    mm_daemon_stats_t *mm_stats = NULL;
-
-    mm_daemon_config_stats_buf_release(cfg_obj);
-    mm_daemon_config_stats_buf_dealloc(cfg_obj);
-    for (i = 0; i < ARRAY_SIZE(vfe_stats); i++) {
-        if (!cfg_obj->stats_buf[vfe_stats[i]] ||
-                !cfg_obj->stats_buf[vfe_stats[i]]->mm_stats)
-            continue;
-        mm_stats = (mm_daemon_stats_t *)
-                cfg_obj->stats_buf[vfe_stats[i]]->mm_stats;
-        mm_daemon_config_stats_cmd(mm_stats, STATS_CMD_SHUTDOWN, 0);
-    }
-    for (i = 0; i < ARRAY_SIZE(vfe_stats); i++)
-        mm_daemon_stats_close(cfg_obj, vfe_stats[i]);
-}
-
 static int mm_daemon_config_start_preview(mm_daemon_cfg_t *cfg_obj)
 {
     cam_stream_type_t stream_type = CAM_STREAM_TYPE_PREVIEW;
@@ -3043,6 +3054,199 @@ static void mm_daemon_config_stop_video(mm_daemon_cfg_t *cfg_obj)
     cfg_obj->vfe_started = 0;
 }
 
+static int mm_daemon_config_sk_pkt_map(mm_daemon_cfg_t *cfg_obj,
+       struct mm_daemon_sk_pkt *sk_pkt)
+{
+    mm_daemon_thread_info *info = NULL;
+    cam_sock_packet_t *packet = NULL;
+    int idx, stream_id, buf_idx, rc = -EINVAL;
+    mm_daemon_buf_info *buf = NULL;
+
+    info = cfg_obj->info[SOCK_DEV];
+    packet = (cam_sock_packet_t *)sk_pkt->data;
+    stream_id = packet->payload.buf_map.stream_id;
+    buf_idx = packet->payload.buf_map.frame_idx;
+
+    pthread_mutex_lock(&info->lock);
+    switch (packet->payload.buf_map.type) {
+    case CAM_MAPPING_BUF_TYPE_CAPABILITY:
+        if (cfg_obj->cap_buf.mapped)
+            break;
+        cfg_obj->cap_buf.vaddr = mmap(0, sizeof(cam_capability_t),
+                PROT_READ|PROT_WRITE, MAP_SHARED, sk_pkt->fd, 0);
+        if (cfg_obj->cap_buf.vaddr == MAP_FAILED)
+            close(sk_pkt->fd);
+        else {
+            cfg_obj->cap_buf.fd = sk_pkt->fd;
+            cfg_obj->cap_buf.mapped = 1;
+            memcpy(cfg_obj->cap_buf.vaddr, cfg_obj->sdata->cap,
+                    sizeof(cam_capability_t));
+            mm_daemon_config_server_cmd(cfg_obj->cfg->cb_pfd,
+                    SERVER_CMD_CAP_BUF_MAP, 1);
+            rc = 0;
+        }
+        break;
+    case CAM_MAPPING_BUF_TYPE_PARM_BUF:
+        cfg_obj->parm_buf.buf = (parm_buffer_t *)mmap(0,
+                sizeof(parm_buffer_t), PROT_READ|PROT_WRITE, MAP_SHARED,
+                sk_pkt->fd, 0);
+        if (cfg_obj->parm_buf.buf == MAP_FAILED)
+            close(sk_pkt->fd);
+        else {
+            cfg_obj->parm_buf.fd = sk_pkt->fd;
+            cfg_obj->parm_buf.mapped = 1;
+            cfg_obj->parm_buf.cfg_buf = (parm_buffer_t *)calloc(1,
+                    sizeof(parm_buffer_t));
+            if (cfg_obj->parm_buf.cfg_buf == NULL)
+                break;
+            rc = 0;
+        }
+        break;
+    case CAM_MAPPING_BUF_TYPE_STREAM_BUF:
+        idx = mm_daemon_get_stream_idx(cfg_obj, stream_id);
+        if (idx < 0)
+            break;
+        buf = cfg_obj->stream_buf[idx];
+        if (buf_idx < CAM_MAX_NUM_BUFS_PER_STREAM) {
+            buf->buf_data[buf_idx].fd = sk_pkt->fd;
+            buf->buf_data[buf_idx].len = packet->payload.buf_map.size;
+            buf->num_stream_bufs++;
+            rc = 0;
+        }
+        break;
+    case CAM_MAPPING_BUF_TYPE_STREAM_INFO:
+        idx = mm_daemon_get_stream_idx(cfg_obj, stream_id);
+        if (idx >= 0)
+            buf = cfg_obj->stream_buf[idx];
+        if (buf == NULL) {
+            ALOGE("%s: no buffer for stream %d", __FUNCTION__, idx);
+            close(sk_pkt->fd);
+            break;
+        }
+        buf->stream_info =
+                (cam_stream_info_t *)mmap(0, sizeof(cam_stream_info_t),
+                PROT_READ|PROT_WRITE, MAP_SHARED, sk_pkt->fd, 0);
+        if (buf->stream_info == MAP_FAILED) {
+            ALOGE("%s: stream_info mapping failed for stream %d",
+                    __FUNCTION__, stream_id);
+            close(sk_pkt->fd);
+            break;
+        }
+        buf->stream_info_mapped = 1;
+        buf->fd = sk_pkt->fd;
+        if (cfg_obj->current_streams == 0) {
+            mm_daemon_config_vfe_reset(cfg_obj);
+            mm_daemon_config_vfe_module(cfg_obj);
+        }
+        mm_daemon_config_set_current_streams(cfg_obj,
+                buf->stream_info->stream_type, 1);
+        if (buf->stream_info->stream_type == CAM_STREAM_TYPE_METADATA) {
+            buf->output_format = V4L2_PIX_FMT_META;
+            rc = 0;
+        } else {
+            buf->output_format =
+                    mm_daemon_config_v4l2_fmt(buf->stream_info->fmt);
+            rc = mm_daemon_config_isp_buf_request(cfg_obj, buf, stream_id);
+        }
+
+        cfg_obj->num_streams++;
+        break;
+    default:
+        break;
+    }
+
+    pthread_cond_signal(&info->cond);
+    pthread_mutex_unlock(&info->lock);
+    return rc;
+}
+
+static int mm_daemon_config_sk_pkt_unmap(mm_daemon_cfg_t *cfg_obj,
+        struct mm_daemon_sk_pkt *sk_pkt)
+{
+    cam_sock_packet_t *packet = NULL;
+    int idx, stream_id, buf_idx;
+    mm_daemon_buf_info *buf = NULL;
+    mm_daemon_thread_info *info = NULL;
+
+    if (!sk_pkt || !sk_pkt->data)
+        return -EINVAL;
+
+    info = cfg_obj->info[SOCK_DEV];
+    packet = (cam_sock_packet_t *)sk_pkt->data;
+    stream_id = packet->payload.buf_unmap.stream_id;
+    pthread_mutex_lock(&info->lock);
+
+    switch (packet->payload.buf_unmap.type) {
+    case CAM_MAPPING_BUF_TYPE_CAPABILITY:
+        if (!cfg_obj->cap_buf.mapped)
+            ALOGE("%s: capability buf not mapped", __FUNCTION__);
+        else {
+            if (munmap(cfg_obj->cap_buf.vaddr, sizeof(cam_capability_t)))
+                ALOGE("%s: Failed to unmap memory at %p : %s",
+                        __FUNCTION__, cfg_obj->cap_buf.vaddr,
+                        strerror(errno));
+            close(cfg_obj->cap_buf.fd);
+            cfg_obj->cap_buf.fd = 0;
+            cfg_obj->cap_buf.mapped = 0;
+            mm_daemon_config_server_cmd(cfg_obj->cfg->cb_pfd,
+                    SERVER_CMD_CAP_BUF_MAP, 0);
+        }
+        break;
+    case CAM_MAPPING_BUF_TYPE_PARM_BUF:
+        if (!cfg_obj->parm_buf.mapped)
+            ALOGE("%s: parm buf not mapped", __FUNCTION__);
+        else {
+            if (munmap(cfg_obj->parm_buf.buf, sizeof(parm_buffer_t)))
+                ALOGE("%s: Failed to unmap memory at %p : %s",
+                        __FUNCTION__, cfg_obj->parm_buf.buf,
+                        strerror(errno));
+            close(cfg_obj->parm_buf.fd);
+            cfg_obj->parm_buf.fd = 0;
+            cfg_obj->parm_buf.mapped = 0;
+            free(cfg_obj->parm_buf.cfg_buf);
+        }
+        break;
+    case CAM_MAPPING_BUF_TYPE_STREAM_INFO:
+        idx = mm_daemon_get_stream_idx(cfg_obj, stream_id);
+        if (idx >= 0)
+            buf = cfg_obj->stream_buf[idx];
+        if (buf && buf->stream_info_mapped) {
+            mm_daemon_config_isp_buf_release(cfg_obj,
+                    buf->stream_info->stream_type);
+            for (buf_idx = 0; buf_idx < buf->num_stream_bufs; buf_idx++) {
+                if (buf->stream_info->stream_type ==
+                        CAM_STREAM_TYPE_METADATA) {
+                    if (buf->buf_data[buf_idx].mapped) {
+                        munmap(buf->buf_data[buf_idx].vaddr,
+                                sizeof(cam_metadata_info_t));
+                    }
+                }
+                close(buf->buf_data[buf_idx].fd);
+                buf->buf_data[buf_idx].mapped = 0;
+                buf->buf_data[buf_idx].fd = 0;
+            }
+            mm_daemon_config_set_current_streams(cfg_obj,
+                    buf->stream_info->stream_type, 0);
+            if (munmap(buf->stream_info, sizeof(cam_stream_info_t)))
+                ALOGE("%s Failed to unmap memory at %p : %s",
+                        __FUNCTION__, buf->stream_info,
+                        strerror(errno));
+            buf->stream_info = NULL;
+            close(buf->fd);
+            buf->fd = 0;
+            buf->stream_info_mapped = 0;
+        }
+        cfg_obj->num_streams--;
+        break;
+    default:
+        break;
+    }
+
+    pthread_cond_signal(&info->cond);
+    pthread_mutex_unlock(&info->lock);
+    return 0;
+}
+
 static void mm_daemon_config_isp_evt_sof(mm_daemon_cfg_t *cfg_obj)
 {
     //Possibly useless check.  Updates AWB and AEC during VIDEO and PREVIEW.
@@ -3053,8 +3257,8 @@ static void mm_daemon_config_isp_evt_sof(mm_daemon_cfg_t *cfg_obj)
             cfg_obj->wb_changed = 0;
         }
         if (cfg_obj->gain_changed) {
-            if (cfg_obj->snsr->state == STATE_POLL)
-                mm_daemon_config_sensor_cmd(cfg_obj->snsr, SENSOR_CMD_EXP_GAIN,
+            if (cfg_obj->info[SNSR_DEV]->state != STATE_STOPPED)
+                mm_daemon_config_sensor_cmd(cfg_obj->info[SNSR_DEV], SENSOR_CMD_EXP_GAIN,
                         cfg_obj->curr_gain, 0);
             cfg_obj->gain_changed = 0;
         }
@@ -3137,8 +3341,7 @@ static int mm_daemon_config_dequeue(mm_daemon_cfg_t *cfg_obj)
     return mm_daemon_config_isp_evt(cfg_obj, &isp_event);
 }
 
-static int mm_daemon_config_pipe_cmd(mm_daemon_obj_t *mm_obj,
-        mm_daemon_cfg_t *cfg_obj)
+static int mm_daemon_config_pipe_cmd(mm_daemon_cfg_t *cfg_obj)
 {
     int rc = 0;
     ssize_t read_len;
@@ -3147,7 +3350,7 @@ static int mm_daemon_config_pipe_cmd(mm_daemon_obj_t *mm_obj,
     mm_daemon_pipe_evt_t pipe_cmd;
     mm_daemon_buf_info *buf = NULL;
 
-    read_len = read(mm_obj->cfg_pfds[0], &pipe_cmd, sizeof(pipe_cmd));
+    read_len = read(cfg_obj->cfg->pfds[0], &pipe_cmd, sizeof(pipe_cmd));
     stream_id = pipe_cmd.val;
     switch (pipe_cmd.cmd) {
         case CFG_CMD_STREAM_START:
@@ -3159,7 +3362,10 @@ static int mm_daemon_config_pipe_cmd(mm_daemon_obj_t *mm_obj,
                 stream_type = buf->stream_info->stream_type;
                 switch (stream_type) {
                     case CAM_STREAM_TYPE_PREVIEW:
-                        mm_daemon_config_sensor_cmd(cfg_obj->snsr,
+                        if (cfg_obj->info[CSI_DEV])
+                            mm_daemon_config_csi_cmd(cfg_obj->info[CSI_DEV],
+                                    CSI_CMD_CFG, 0);
+                        mm_daemon_config_sensor_cmd(cfg_obj->info[SNSR_DEV],
                                 SENSOR_CMD_PREVIEW, 0, 1);
                         rc = mm_daemon_config_start_preview(cfg_obj);
                         break;
@@ -3178,7 +3384,7 @@ static int mm_daemon_config_pipe_cmd(mm_daemon_obj_t *mm_obj,
                             mm_daemon_config_isp_buf_enqueue(cfg_obj,
                                     stream_type);
                         if (stream_type == CAM_STREAM_TYPE_SNAPSHOT) {
-                            mm_daemon_config_sensor_cmd(cfg_obj->snsr,
+                            mm_daemon_config_sensor_cmd(cfg_obj->info[SNSR_DEV],
                                     SENSOR_CMD_SNAPSHOT, 0, 1);
                             rc = mm_daemon_config_start_snapshot(cfg_obj);
                         }
@@ -3225,18 +3431,21 @@ static int mm_daemon_config_pipe_cmd(mm_daemon_obj_t *mm_obj,
             }
             break;
         case CFG_CMD_NEW_STREAM:
+            pthread_mutex_lock(&cfg_obj->cfg->lock);
             for (idx = 0; idx < MAX_NUM_STREAM; idx++) {
                 if (cfg_obj->stream_buf[idx] == NULL)
                     break;
             }
             if (idx == MAX_NUM_STREAM)
                 return -ENOMEM;
-            mm_daemon_config_sensor_cmd(cfg_obj->snsr,
+            mm_daemon_config_sensor_cmd(cfg_obj->info[SNSR_DEV],
                     SENSOR_CMD_POWER_UP, 0, 0);
             cfg_obj->stream_buf[idx] = (mm_daemon_buf_info *)malloc(
                     sizeof(mm_daemon_buf_info));
             memset(cfg_obj->stream_buf[idx], 0, sizeof(mm_daemon_buf_info));
             cfg_obj->stream_buf[idx]->stream_id = stream_id;
+            pthread_cond_signal(&cfg_obj->cfg->cond);
+            pthread_mutex_unlock(&cfg_obj->cfg->lock);
             break;
         case CFG_CMD_DEL_STREAM:
             idx = mm_daemon_get_stream_idx(cfg_obj, stream_id);
@@ -3252,8 +3461,26 @@ static int mm_daemon_config_pipe_cmd(mm_daemon_obj_t *mm_obj,
                 mm_daemon_config_parm(cfg_obj);
             break;
         case CFG_CMD_MAP_UNMAP_DONE:
-            mm_daemon_config_server_cmd(mm_obj, SERVER_CMD_MAP_UNMAP_DONE,
-                    pipe_cmd.val);
+            mm_daemon_config_server_cmd(cfg_obj->cfg->cb_pfd,
+                    SERVER_CMD_MAP_UNMAP_DONE, pipe_cmd.val);
+            break;
+        case CFG_CMD_SK_PKT_MAP:
+            rc = mm_daemon_config_sk_pkt_map(cfg_obj,
+                    (struct mm_daemon_sk_pkt *)pipe_cmd.val);
+            mm_daemon_config_server_cmd(cfg_obj->cfg->cb_pfd,
+                    SERVER_CMD_MAP_UNMAP_DONE, pipe_cmd.val);
+            break;
+        case CFG_CMD_SK_PKT_UNMAP:
+            rc = mm_daemon_config_sk_pkt_unmap(cfg_obj,
+                    (struct mm_daemon_sk_pkt *)pipe_cmd.val);
+            mm_daemon_config_server_cmd(cfg_obj->cfg->cb_pfd,
+                    SERVER_CMD_MAP_UNMAP_DONE, pipe_cmd.val);
+            break;
+        case CFG_CMD_SK_ERR:
+            rc = -1;
+            break;
+        case CFG_CMD_ERR:
+            rc = -1;
             break;
         case CFG_CMD_SHUTDOWN:
             rc = -1;
@@ -3263,353 +3490,7 @@ static int mm_daemon_config_pipe_cmd(mm_daemon_obj_t *mm_obj,
     return rc;
 }
 
-mm_daemon_socket_t *mm_daemon_socket_create(
-        mm_daemon_sd_obj_t *sd, uint8_t cam_idx)
-{
-    struct sockaddr_un sockaddr;
-    mm_daemon_socket_t *sock_obj = NULL;
-    int sock_fd;
-    int dev_id;
-    char *devpath = sd->camera_sd[cam_idx].devpath;
-    mm_daemon_obj_t *mm_obj = sd->mm_obj;
-
-    sscanf(devpath, "/dev/video%u", &dev_id);
-    sock_obj = (mm_daemon_socket_t *)malloc(
-            sizeof(mm_daemon_socket_t));
-    if (sock_obj == NULL)
-        return NULL;
-
-    sock_fd = socket(AF_UNIX, SOCK_DGRAM, 0);
-    if (sock_fd < 0) {
-        ALOGE("%s: Error creating socket", __FUNCTION__);
-        free(sock_obj);
-        return NULL;
-    }
-    memset(sock_obj, 0, sizeof(mm_daemon_socket_t));
-    memset(&sockaddr, 0, sizeof(sockaddr));
-    sockaddr.sun_family = AF_UNIX;
-    snprintf(sockaddr.sun_path, sizeof(sockaddr.sun_path),
-            "/data/cam_socket%d", dev_id);
-    if ((unlink(sockaddr.sun_path)) != 0 && errno != ENOENT)
-        ALOGE("%s: failed to unlink socket '%s': %s", __FUNCTION__,
-                sockaddr.sun_path, strerror(errno));
-    else {
-        if ((bind(sock_fd, (struct sockaddr *)&sockaddr,
-                sizeof(sockaddr))) == 0) {
-            ALOGI("%s: bound sock_fd=%d %s", __FUNCTION__, sock_fd,
-                    sockaddr.sun_path);
-            chmod(sockaddr.sun_path, 0660);
-            sock_obj->sock_fd = sock_fd;
-            sock_obj->daemon_obj = mm_obj;
-            sock_obj->sock_addr = sockaddr;
-            sock_obj->dev_id = dev_id;
-            return sock_obj;
-        } else
-            ALOGE("%s: unable to bind socket", __FUNCTION__);
-    }
-
-    close(sock_fd);
-    free(sock_obj);
-    return NULL;
-}
-
-static int mm_daemon_proc_packet_map(mm_daemon_socket_t *mm_sock,
-        cam_sock_packet_t *packet, int rcvd_fd)
-{
-    struct v4l2_event ev;
-    struct ion_fd_data ion_data;
-    int idx, stream_id, buf_idx, rc = 0;
-    mm_daemon_buf_info *buf = NULL;
-    mm_daemon_obj_t *mm_obj = (mm_daemon_obj_t *)mm_sock->daemon_obj;
-    mm_daemon_cfg_t *cfg_obj = mm_sock->cfg_obj;
-
-    memset(&ev, 0, sizeof(ev));
-    memset(&ion_data, 0, sizeof(ion_data));
-    stream_id = packet->payload.buf_map.stream_id;
-    buf_idx = packet->payload.buf_map.frame_idx;
-    switch (packet->payload.buf_map.type) {
-        case CAM_MAPPING_BUF_TYPE_CAPABILITY:
-            if (mm_obj->cap_buf.mapped)
-                return -EINVAL;
-            mm_obj->cap_buf.vaddr = mmap(0, sizeof(cam_capability_t),
-                    PROT_READ|PROT_WRITE, MAP_SHARED, rcvd_fd, 0);
-            if (mm_obj->cap_buf.vaddr == MAP_FAILED) {
-                close(rcvd_fd);
-                rc = -1;
-            } else {
-                mm_obj->cap_buf.fd = rcvd_fd;
-                mm_obj->cap_buf.mapped = 1;
-                memcpy(mm_obj->cap_buf.vaddr, cfg_obj->sdata->cap,
-                        sizeof(cam_capability_t));
-            }
-            break;
-        case CAM_MAPPING_BUF_TYPE_PARM_BUF:
-            cfg_obj->parm_buf.buf = (parm_buffer_t *)mmap(0,
-                    sizeof(parm_buffer_t), PROT_READ|PROT_WRITE, MAP_SHARED,
-                    rcvd_fd, 0);
-            if (cfg_obj->parm_buf.buf == MAP_FAILED) {
-                close(rcvd_fd);
-                rc = -1;
-            } else {
-                cfg_obj->parm_buf.fd = rcvd_fd;
-                cfg_obj->parm_buf.mapped = 1;
-                cfg_obj->parm_buf.cfg_buf = (parm_buffer_t *)calloc(1,
-                        sizeof(parm_buffer_t));
-                if (cfg_obj->parm_buf.cfg_buf == NULL)
-                    rc = -1;
-            }
-            break;
-        case CAM_MAPPING_BUF_TYPE_STREAM_BUF:
-            idx = mm_daemon_get_stream_idx(cfg_obj, stream_id);
-            if (idx < 0) {
-                rc = idx;
-                break;
-            }
-            buf = cfg_obj->stream_buf[idx];
-            if (buf_idx < CAM_MAX_NUM_BUFS_PER_STREAM) {
-                buf->buf_data[buf_idx].fd = rcvd_fd;
-                buf->buf_data[buf_idx].len = packet->payload.buf_map.size;
-                buf->num_stream_bufs++;
-            }
-            break;
-        case CAM_MAPPING_BUF_TYPE_STREAM_INFO:
-            idx = mm_daemon_get_stream_idx(cfg_obj, stream_id);
-            if (idx >= 0)
-                buf = cfg_obj->stream_buf[idx];
-            if (buf == NULL) {
-                ALOGE("%s: no buffer for stream %d", __FUNCTION__, stream_id);
-                close(rcvd_fd);
-                break;
-            }
-            buf->stream_info =
-                    (cam_stream_info_t *)mmap(0, sizeof(cam_stream_info_t),
-                    PROT_READ|PROT_WRITE, MAP_SHARED, rcvd_fd, 0);
-            if (buf->stream_info == MAP_FAILED) {
-                ALOGE("%s: stream_info mapping failed for stream %d",
-                        __FUNCTION__, mm_obj->stream_id);
-                close(rcvd_fd);
-                break;
-            }
-            buf->stream_info_mapped = 1;
-            buf->fd = rcvd_fd;
-            if (cfg_obj->current_streams == 0) {
-                mm_daemon_config_vfe_reset(cfg_obj);
-                mm_daemon_config_vfe_module(cfg_obj);
-            }
-            mm_daemon_config_set_current_streams(cfg_obj,
-                    buf->stream_info->stream_type, 1);
-            if (buf->stream_info->stream_type == CAM_STREAM_TYPE_METADATA) {
-                buf->output_format = V4L2_PIX_FMT_META;
-            } else {
-                buf->output_format =
-                        mm_daemon_config_v4l2_fmt(buf->stream_info->fmt);
-                rc = mm_daemon_config_isp_buf_request(cfg_obj, buf, stream_id);
-            }
-
-            cfg_obj->num_streams++;
-            break;
-        default:
-            break;
-    }
-    mm_daemon_config_send_config_cmd(mm_obj->cfg_pfds[1], CFG_CMD_MAP_UNMAP_DONE,
-            stream_id);
-    return rc;
-}
-
-static int mm_daemon_proc_packet_unmap(mm_daemon_socket_t *mm_sock,
-        cam_sock_packet_t *packet)
-{
-    struct v4l2_event ev;
-    int idx, stream_id, buf_idx, rc = 0;
-    mm_daemon_buf_info *buf = NULL;
-    mm_daemon_obj_t *mm_obj = (mm_daemon_obj_t *)mm_sock->daemon_obj;
-    mm_daemon_cfg_t *cfg_obj = mm_sock->cfg_obj;
-
-    memset(&ev, 0, sizeof(ev));
-    stream_id = packet->payload.buf_unmap.stream_id;
-    
-    switch (packet->payload.buf_unmap.type) {
-        case CAM_MAPPING_BUF_TYPE_CAPABILITY:
-            if (!mm_obj->cap_buf.mapped)
-                ALOGE("%s: capability buf not mapped", __FUNCTION__);
-            else {
-                if (munmap(mm_obj->cap_buf.vaddr, sizeof(cam_capability_t)))
-                    ALOGE("%s: Failed to unmap memory at %p : %s",
-                            __FUNCTION__, mm_obj->cap_buf.vaddr,
-                            strerror(errno));
-                close(mm_obj->cap_buf.fd);
-                mm_obj->cap_buf.fd = 0;
-                mm_obj->cap_buf.mapped = 0;
-            }
-            break;
-        case CAM_MAPPING_BUF_TYPE_PARM_BUF:
-            if (!cfg_obj->parm_buf.mapped)
-                ALOGE("%s: parm buf not mapped", __FUNCTION__);
-            else {
-                if (munmap(cfg_obj->parm_buf.buf, sizeof(parm_buffer_t)))
-                    ALOGE("%s: Failed to unmap memory at %p : %s",
-                            __FUNCTION__, cfg_obj->parm_buf.buf,
-                            strerror(errno));
-                close(cfg_obj->parm_buf.fd);
-                cfg_obj->parm_buf.fd = 0;
-                cfg_obj->parm_buf.mapped = 0;
-                free(cfg_obj->parm_buf.cfg_buf);
-            }
-            break;
-        case CAM_MAPPING_BUF_TYPE_STREAM_INFO:
-            idx = mm_daemon_get_stream_idx(cfg_obj, stream_id);
-            if (idx >= 0)
-                buf = cfg_obj->stream_buf[idx];
-            if (buf && buf->stream_info_mapped) {
-                mm_daemon_config_isp_buf_release(cfg_obj,
-                        buf->stream_info->stream_type);
-                for (buf_idx = 0; buf_idx < buf->num_stream_bufs; buf_idx++) {
-                    if (buf->stream_info->stream_type ==
-                            CAM_STREAM_TYPE_METADATA) {
-                        if (buf->buf_data[buf_idx].mapped) {
-                            munmap(buf->buf_data[buf_idx].vaddr,
-                                    sizeof(cam_metadata_info_t));
-                        }
-                    }
-                    close(buf->buf_data[buf_idx].fd);
-                    buf->buf_data[buf_idx].mapped = 0;
-                    buf->buf_data[buf_idx].fd = 0;
-                }
-                mm_daemon_config_set_current_streams(cfg_obj,
-                        buf->stream_info->stream_type, 0);
-                if (munmap(buf->stream_info, sizeof(cam_stream_info_t)))
-                    ALOGE("%s Failed to unmap memory at %p : %s",
-                            __FUNCTION__, buf->stream_info,
-                            strerror(errno));
-                buf->stream_info = NULL;
-                close(buf->fd);
-                buf->fd = 0;
-                buf->stream_info_mapped = 0;
-            }
-            cfg_obj->num_streams--;
-            break;
-        default:
-            break;
-    }
-    mm_daemon_config_send_config_cmd(mm_obj->cfg_pfds[1], CFG_CMD_MAP_UNMAP_DONE,
-            stream_id);
-    return rc;
-}
-
-static int mm_daemon_proc_packet(mm_daemon_socket_t *mm_sock,
-        cam_sock_packet_t *packet, int rcvd_fd)
-{
-    int rc = -1;
-
-    switch (packet->msg_type) {
-    case CAM_MAPPING_TYPE_FD_MAPPING:
-        rc = mm_daemon_proc_packet_map(mm_sock, packet, rcvd_fd);
-        break;
-    case CAM_MAPPING_TYPE_FD_UNMAPPING:
-        rc = mm_daemon_proc_packet_unmap(mm_sock, packet);
-        break;
-    default:
-        break;
-    }
-    return rc;
-}
-
-static void *mm_daemon_sock_thread(void *data)
-{
-    mm_daemon_socket_t *mm_sock = (mm_daemon_socket_t *)data;
-    cam_sock_packet_t packet;
-    struct msghdr msgh;
-    struct iovec iov[1];
-    struct cmsghdr *cmsghp = NULL;
-    char control[CMSG_SPACE(sizeof(int))];
-    int rcvd_fd = -1;
-    int rc = 0;
-
-    mm_sock->state = SOCKET_STATE_CONNECTED;
-
-    do {
-        memset(&msgh, 0, sizeof(msgh));
-        memset(&packet, 0, sizeof(cam_sock_packet_t));
-        msgh.msg_name = NULL;
-        msgh.msg_namelen = 0;
-        msgh.msg_control = control;
-        msgh.msg_controllen = sizeof(control);
-
-        iov[0].iov_base = &packet;
-        iov[0].iov_len = sizeof(cam_sock_packet_t);
-
-        msgh.msg_iov = iov;
-        msgh.msg_iovlen = 1;
-
-        rc = recvmsg(mm_sock->sock_fd, &(msgh), 0);
-        if (((cmsghp = CMSG_FIRSTHDR(&msgh)) != NULL) &&
-                (cmsghp->cmsg_len == CMSG_LEN(sizeof(int)))) {
-            if (cmsghp->cmsg_level == SOL_SOCKET &&
-                    cmsghp->cmsg_type == SCM_RIGHTS)
-                rcvd_fd = *((int *)CMSG_DATA(cmsghp));
-            else
-                ALOGE("%s: Unexpected Control Msg", __FUNCTION__);
-        }
-
-        if ((mm_daemon_proc_packet(mm_sock, &packet, rcvd_fd)) < 0)
-            mm_sock->state = SOCKET_STATE_DISCONNECTED;
-    } while (mm_sock->state == SOCKET_STATE_CONNECTED);
-    return NULL;
-}
-
-int mm_daemon_sock_open(mm_daemon_socket_t *mm_sock)
-{
-    pthread_attr_t attr;
-    pthread_attr_init(&attr);
-    pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE);
-    pthread_create(&mm_sock->pid, &attr,
-            mm_daemon_sock_thread, (void *)mm_sock);
-    pthread_attr_destroy(&attr);
-    return 0;
-}
-
-void mm_daemon_sock_close(mm_daemon_socket_t *mm_sock)
-{
-    int socket_fd;
-    struct sockaddr_un sock_addr;
-    struct msghdr msgh;
-    struct iovec iov[1];
-    void *rc;
-    cam_sock_packet_t packet;
-
-    socket_fd = socket(AF_UNIX, SOCK_DGRAM, 0);
-    if (socket_fd < 0)
-        return;
-
-    memset(&packet, 0, sizeof(packet));
-    memset(&sock_addr, 0, sizeof(sock_addr));
-    memset(&msgh, 0, sizeof(msgh));
-    sock_addr.sun_family = AF_UNIX;
-    snprintf(sock_addr.sun_path, sizeof(sock_addr.sun_path),
-            "/data/cam_socket%d", mm_sock->dev_id);
-    if ((connect(socket_fd, (struct sockaddr *)&sock_addr,
-            sizeof(sock_addr))) != 0) {
-        close(socket_fd);
-        return;
-    }
-
-    packet.msg_type = CAM_MAPPING_TYPE_MAX;
-    msgh.msg_name = NULL;
-    msgh.msg_namelen = 0;
-    iov[0].iov_base = &packet;
-    iov[0].iov_len = sizeof(packet);
-    msgh.msg_iov = iov;
-    msgh.msg_iovlen = 1;
-    msgh.msg_control = NULL;
-    msgh.msg_controllen = 0;
-
-    sendmsg(socket_fd, &(msgh), 0);
-    pthread_join(mm_sock->pid, &rc);
-    close(socket_fd);
-}
-
-static void mm_daemon_config_buf_close(mm_daemon_obj_t *mm_obj,
-        mm_daemon_cfg_t *cfg_obj)
+static void mm_daemon_config_buf_close(mm_daemon_cfg_t *cfg_obj)
 {
     int i, j;
     mm_daemon_buf_info *buf = NULL;
@@ -3642,11 +3523,11 @@ static void mm_daemon_config_buf_close(mm_daemon_obj_t *mm_obj,
         free(buf);
         cfg_obj->stream_buf[i] = NULL;
     }
-    if (mm_obj->cap_buf.mapped) {
-        munmap(mm_obj->cap_buf.vaddr, sizeof(cam_capability_t));
-        close(mm_obj->cap_buf.fd);
-        mm_obj->cap_buf.fd = 0;
-        mm_obj->cap_buf.mapped = 0;
+    if (cfg_obj->cap_buf.mapped) {
+        munmap(cfg_obj->cap_buf.vaddr, sizeof(cam_capability_t));
+        close(cfg_obj->cap_buf.fd);
+        cfg_obj->cap_buf.fd = 0;
+        cfg_obj->cap_buf.mapped = 0;
     }
     if (cfg_obj->parm_buf.mapped) {
         munmap(cfg_obj->parm_buf.buf, sizeof(parm_buffer_t));
@@ -3657,117 +3538,168 @@ static void mm_daemon_config_buf_close(mm_daemon_obj_t *mm_obj,
     }
 }
 
-static mm_daemon_thread_info *mm_daemon_config_sensor_init(
-        mm_daemon_subdev *subdev)
+static void mm_daemon_config_thread_stop(mm_daemon_cfg_t *cfg_obj)
 {
-    mm_daemon_thread_info *snsr;
-    snsr = (mm_daemon_thread_info *)calloc(1, sizeof(mm_daemon_thread_info));
+    mm_daemon_thread_state state;
+    mm_daemon_thread_info *info = NULL;
+    int i;
 
-    if (!snsr)
-        return NULL;
-
-    snsr->data = subdev->data;
-    snsr->devpath = subdev->devpath;
-
-    if (mm_daemon_sensor_open(snsr) < 0) {
-        free(snsr);
-        return NULL;
+    for (i = 0; i < MAX_DEV; i++) {
+        info = cfg_obj->info[i];
+        if (info) {
+            state = info->state;
+            info->state = STATE_STOPPED;
+            if (state == STATE_LOCKED) {
+                pthread_mutex_lock(&info->lock);
+                pthread_cond_signal(&info->cond);
+                pthread_mutex_unlock(&info->lock);
+            }
+            if (info->ops->stop)
+                info->ops->stop(info);
+            else
+                mm_daemon_util_pipe_cmd(info->pfds[1], 0, 0);
+        }
     }
-    return snsr;
 }
 
-static void mm_daemon_config_sensor_deinit(mm_daemon_cfg_t *cfg_obj)
+static void mm_daemon_config_thread_close(mm_daemon_cfg_t *cfg_obj)
 {
+    mm_daemon_thread_info *info = NULL;
+    int i;
 
-    if (cfg_obj->snsr) {
-        mm_daemon_sensor_close(cfg_obj->snsr);
-        free(cfg_obj->snsr);
-        cfg_obj->snsr = NULL;
+    for (i = 0; i < MAX_DEV; i++) {
+        info = cfg_obj->info[i];
+        if (info) {
+            mm_daemon_util_thread_close(info);
+            cfg_obj->info[i] = NULL;
+        }
     }
+}
+
+static void mm_daemon_config_stats_init(mm_daemon_cfg_t *cfg_obj)
+{
+    size_t i;
+
+    for (i = 0; i < ARRAY_SIZE(vfe_stats); i++) {
+        mm_daemon_stats_open(cfg_obj, vfe_stats[i]); 
+    }
+    mm_daemon_config_stats_buf_request(cfg_obj);
+    mm_daemon_config_stats_buf_alloc(cfg_obj);
+    mm_daemon_config_stats_buf_enqueue(cfg_obj);
+}
+
+static void mm_daemon_config_stats_deinit(mm_daemon_cfg_t *cfg_obj)
+{
+    size_t i;
+    mm_daemon_stats_t *mm_stats = NULL;
+
+    mm_daemon_config_stats_buf_release(cfg_obj);
+    mm_daemon_config_stats_buf_dealloc(cfg_obj);
+    for (i = 0; i < ARRAY_SIZE(vfe_stats); i++) {
+        if (!cfg_obj->stats_buf[vfe_stats[i]] ||
+                !cfg_obj->stats_buf[vfe_stats[i]]->mm_stats)
+            continue;
+        mm_stats = (mm_daemon_stats_t *)
+                cfg_obj->stats_buf[vfe_stats[i]]->mm_stats;
+        mm_daemon_config_stats_cmd(mm_stats, STATS_CMD_SHUTDOWN, 0);
+    }
+    for (i = 0; i < ARRAY_SIZE(vfe_stats); i++)
+        mm_daemon_stats_close(cfg_obj, vfe_stats[i]);
 }
 
 static void *mm_daemon_config_thread(void *data)
 {
-    size_t i, j;
+    size_t i;
     int cam_idx, ret = 0;
     struct pollfd fds[2];
-    mm_daemon_socket_t *mm_sock[MSM_MAX_CAMERA_SENSORS];
-    mm_daemon_sd_obj_t *sd = (mm_daemon_sd_obj_t *)data;
-    mm_daemon_obj_t *mm_obj = sd->mm_obj;
+    mm_daemon_thread_info *info = (mm_daemon_thread_info *)data;
+    mm_daemon_sd_obj_t *sd = (mm_daemon_sd_obj_t *)info->data;
     mm_daemon_cfg_t *cfg_obj = NULL;
     mm_sensor_cfg_t *s_cfg = NULL;
 
-    pthread_mutex_lock(&mm_obj->cfg_lock);
-    cfg_obj = (mm_daemon_cfg_t *)malloc(sizeof(mm_daemon_cfg_t));
+    cfg_obj = (mm_daemon_cfg_t *)calloc(1, sizeof(mm_daemon_cfg_t));
 
-    memset(cfg_obj, 0, sizeof(mm_daemon_cfg_t));
-    pthread_mutex_lock(&mm_obj->mutex);
+    cfg_obj->cfg = info;
+    pthread_mutex_lock(&cfg_obj->cfg->lock);
     pthread_mutex_init(&(cfg_obj->lock), NULL);
-    cfg_obj->session_id = mm_obj->session_id;
-    cam_idx = cfg_obj->session_id - 1;
+    cfg_obj->session_id = info->sid;
+    cam_idx = info->sid - 1;
     s_cfg = (mm_sensor_cfg_t *)sd->sensor_sd[cam_idx].data;
     if (!s_cfg)
         goto cfg_close;
     cfg_obj->sdata = s_cfg->data;
+
+    /* VFE */
     cfg_obj->vfe_fd = open(sd->vfe_sd.devpath, O_RDWR | O_NONBLOCK);
     if (cfg_obj->vfe_fd <= 0) {
-        ALOGE("%s: failed to open VFE device", __FUNCTION__);
-        pthread_cond_signal(&mm_obj->cond);
-        pthread_mutex_unlock(&mm_obj->mutex);
+        ALOGE("%s: failed to open VFE device at %s", __FUNCTION__, sd->vfe_sd.devpath);
+        pthread_cond_signal(&cfg_obj->cfg->cond);
+        pthread_mutex_unlock(&cfg_obj->cfg->lock);
         goto cfg_close;
     }
-    cfg_obj->buf_fd = open(sd->buf_sd.devpath, O_RDWR | O_NONBLOCK);
+
+    /* BUF */
+    cfg_obj->buf_fd = open(sd->buf.devpath, O_RDWR | O_NONBLOCK);
     if (cfg_obj->buf_fd <= 0) {
         ALOGE("%s: failed to open genbuf device", __FUNCTION__);
-        pthread_cond_signal(&mm_obj->cond);
-        pthread_mutex_unlock(&mm_obj->mutex);
+        pthread_cond_signal(&cfg_obj->cfg->cond);
+        pthread_mutex_unlock(&cfg_obj->cfg->lock);
         goto vfe_close;
     }
-    for (i = 0; i < sd->num_cameras; i++) {
-        mm_sock[i] = mm_daemon_socket_create(sd, i);
 
-        if (mm_sock[i] == NULL) {
-            ALOGE("%s: failed to create socket", __FUNCTION__);
-            pthread_cond_signal(&mm_obj->cond);
-            pthread_mutex_unlock(&mm_obj->mutex);
-            for (j = 0; j < sd->num_cameras; j++) {
-                if (mm_sock[j]) {
-                    mm_daemon_sock_close(mm_sock[j]);
-                    unlink(mm_sock[j]->sock_addr.sun_path);
-                    close(mm_sock[j]->sock_fd);
-                    free(mm_sock[j]);
-                }
-            }
-            goto buf_close;
-        }
-
-        mm_sock[i]->cfg_obj = cfg_obj;
-        mm_daemon_sock_open(mm_sock[i]);
-    }
-
-    cfg_obj->snsr = mm_daemon_config_sensor_init(&sd->sensor_sd[cam_idx]);
-    if (!cfg_obj->snsr) {
-        ALOGE("%s: Failed to launch sensor thread", __FUNCTION__);
+    /* SOCK */
+    cfg_obj->info[SOCK_DEV] = mm_daemon_util_thread_open(
+            &sd->camera_sd[cam_idx], cam_idx,
+            cfg_obj->cfg->pfds[1]);
+    if (cfg_obj->info[SOCK_DEV] == NULL) {
+        ALOGE("%s: failed to create socket", __FUNCTION__);
+        pthread_cond_signal(&cfg_obj->cfg->cond);
+        pthread_mutex_unlock(&cfg_obj->cfg->lock);
         goto buf_close;
     }
 
-    for (i = 0; i < ARRAY_SIZE(isp_events); i++) {
-        mm_daemon_config_subscribe(cfg_obj, isp_events[i], 1);
+    /* SNSR */
+    cfg_obj->info[SNSR_DEV] = mm_daemon_util_thread_open(
+            &sd->sensor_sd[cam_idx],
+            cam_idx, cfg_obj->cfg->pfds[1]);
+    if (!cfg_obj->info[SNSR_DEV]) {
+        ALOGE("%s: Failed to launch sensor thread", __FUNCTION__);
+        pthread_cond_signal(&cfg_obj->cfg->cond);
+        pthread_mutex_unlock(&cfg_obj->cfg->lock);
+        goto sock_close;
     }
+
+    /* CSI */
+    if (sd->num_csi) {
+        cfg_obj->info[CSI_DEV] = mm_daemon_util_thread_open(
+                &sd->csi[cfg_obj->sdata->csi_dev],
+                cam_idx, cfg_obj->cfg->pfds[1]);
+        if (!cfg_obj->info[CSI_DEV])
+            goto snsr_close;
+    }
+
+    for (i = 0; i < ARRAY_SIZE(isp_events); i++)
+        mm_daemon_config_subscribe(cfg_obj, isp_events[i], 1);
 
     cfg_obj->curr_gain = DEFAULT_EXP_GAIN;
     cfg_obj->curr_wb = 90;
 
+    /* ION */
     cfg_obj->ion_fd = open("/dev/ion", O_RDONLY);
 
+    /* STATS */
     if (cfg_obj->sdata->stats_enable)
         mm_daemon_config_stats_init(cfg_obj);
 
-    mm_obj->cfg_state = STATE_POLL;
-    pthread_cond_signal(&mm_obj->cond);
-    pthread_mutex_unlock(&mm_obj->mutex);
+    if (cfg_obj->info[CSI_DEV] && cfg_obj->sdata->csi_params)
+        mm_daemon_config_csi_cmd(cfg_obj->info[CSI_DEV], CSI_CMD_SET_PARAMS,
+                (uint32_t)cfg_obj->sdata->csi_params);
+
+    info->state = STATE_POLL;
+    pthread_cond_signal(&cfg_obj->cfg->cond);
+    pthread_mutex_unlock(&cfg_obj->cfg->lock);
     fds[0].fd = cfg_obj->vfe_fd;
-    fds[1].fd = mm_obj->cfg_pfds[0];
+    fds[1].fd = cfg_obj->cfg->pfds[0];
     do {
         for (i = 0; i < 2; i++)
             fds[i].events = POLLIN|POLLRDNORM|POLLPRI;
@@ -3776,33 +3708,27 @@ static void *mm_daemon_config_thread(void *data)
                 ret = mm_daemon_config_dequeue(cfg_obj);
             else if ((fds[1].revents & POLLIN) &&
                     (fds[1].revents & POLLRDNORM))
-                ret = mm_daemon_config_pipe_cmd(mm_obj, cfg_obj);
+                ret = mm_daemon_config_pipe_cmd(cfg_obj);
             else
                 usleep(1000);
             if (ret < 0) {
-                mm_daemon_config_sensor_cmd(cfg_obj->snsr,
+                mm_daemon_config_sensor_cmd(cfg_obj->info[SNSR_DEV],
                         SENSOR_CMD_SHUTDOWN, 0, 0);
-                mm_obj->cfg_state = STATE_STOPPED;
+                info->state = STATE_STOPPED;
                 break;
             }
         } else {
             usleep(100);
             continue;
         }
-    } while (mm_obj->cfg_state == STATE_POLL);
+    } while (info->state == STATE_POLL);
+
+    mm_daemon_config_thread_stop(cfg_obj);
 
     if (cfg_obj->sdata->stats_enable)
         mm_daemon_config_stats_deinit(cfg_obj);
 
-    for (i = 0; i < sd->num_cameras; i++) {
-        mm_daemon_sock_close(mm_sock[i]);
-        if (mm_sock[i]) {
-            unlink(mm_sock[i]->sock_addr.sun_path);
-            close(mm_sock[i]->sock_fd);
-            free(mm_sock[i]);
-        }
-    }
-    mm_daemon_config_buf_close(mm_obj, cfg_obj);
+    mm_daemon_config_buf_close(cfg_obj);
 
     for (i = 0; i < ARRAY_SIZE(isp_events); i++) {
         mm_daemon_config_subscribe(cfg_obj, isp_events[i], 0);
@@ -3812,7 +3738,9 @@ static void *mm_daemon_config_thread(void *data)
         close(cfg_obj->ion_fd);
         cfg_obj->ion_fd = 0;
     }
-    mm_daemon_config_sensor_deinit(cfg_obj);
+snsr_close:
+sock_close:
+    mm_daemon_config_thread_close(cfg_obj);
 buf_close:
     if (cfg_obj->buf_fd > 0) {
         close(cfg_obj->buf_fd);
@@ -3824,39 +3752,57 @@ vfe_close:
         cfg_obj->vfe_fd = 0;
     }
 cfg_close:
-    pthread_mutex_unlock(&mm_obj->cfg_lock);
     pthread_mutex_destroy(&(cfg_obj->lock));
     free(cfg_obj);
     return NULL;
 }
 
-int mm_daemon_config_open(mm_daemon_sd_obj_t *sd)
+mm_daemon_thread_info *mm_daemon_config_open(mm_daemon_sd_obj_t *sd,
+        uint8_t session_id, int32_t cb_pfd)
 {
-    int rc = 0;
-    mm_daemon_obj_t *mm_obj = sd->mm_obj;
+    mm_daemon_thread_info *info = NULL;
 
-    if ((mm_obj->session_id > sd->num_sensors) ||
-            (mm_obj->session_id <= 0)) {
-        ALOGE("%s: invalid session_id %d", __FUNCTION__, mm_obj->session_id);
-        return -EINVAL;
+    if ((session_id > sd->num_sensors) ||
+            (session_id <= 0)) {
+        ALOGE("%s: invalid session_id %d", __FUNCTION__, session_id);
+        return NULL;
     }
 
-    rc = pipe(mm_obj->cfg_pfds);
-    if (rc < 0)
-        return rc;
+    info = (mm_daemon_thread_info *)calloc(1, sizeof(mm_daemon_thread_info));
+    if (info == NULL)
+        return NULL;
+
+    if (pipe(info->pfds) < 0) {
+        free(info);
+        return NULL;
+    }
+    info->sid = session_id;
+    info->cb_pfd = cb_pfd;
+    info->data = (void *)sd;
+    pthread_mutex_init(&(info->lock), NULL);
+    pthread_cond_init(&(info->cond), NULL);
     pthread_attr_t attr;
     pthread_attr_init(&attr);
     pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE);
-    pthread_create(&mm_obj->cfg_pid, &attr, mm_daemon_config_thread,
-            (void *)sd);
+    pthread_mutex_lock(&info->lock);
+    pthread_create(&info->pid, &attr, mm_daemon_config_thread,
+            (void *)info);
+    pthread_cond_wait(&info->cond, &info->lock);
+    pthread_mutex_unlock(&info->lock);
     pthread_attr_destroy(&attr);
-    return rc;
+    return info;
 }
 
-int mm_daemon_config_close(mm_daemon_obj_t *mm_obj)
+int mm_daemon_config_close(mm_daemon_thread_info *info)
 {
     void *rc;
 
-    pthread_join(mm_obj->cfg_pid, &rc);
+    if (!info)
+        return -EINVAL;
+
+    pthread_join(info->pid, &rc);
+    pthread_mutex_destroy(&(info->lock));
+    pthread_cond_destroy(&(info->cond));
+    free(info);
     return (int)rc;
 }

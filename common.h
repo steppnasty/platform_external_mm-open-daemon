@@ -1,5 +1,5 @@
 /*
-   Copyright (C) 2016 Brian Stepp 
+   Copyright (C) 2016-2017 Brian Stepp 
       steppnasty@gmail.com
 
    This program is free software; you can redistribute it and/or
@@ -31,11 +31,14 @@
 
 enum mm_sensor_stream_type {
     PREVIEW,
+    VIDEO,
     SNAPSHOT,
     STREAM_TYPE_MAX,
 };
 
-struct mm_sensor_attr {
+/* per-stream settings */
+struct mm_sensor_stream_attr {
+    uint32_t ro_cfg;
     uint16_t h;
     uint16_t w;
     uint16_t blk_l;
@@ -43,11 +46,47 @@ struct mm_sensor_attr {
 };
 
 struct mm_sensor_data {
-    struct mm_sensor_attr *attr[STREAM_TYPE_MAX];
+    struct mm_sensor_stream_attr *attr[STREAM_TYPE_MAX];
+    void *csi_params;
     cam_capability_t *cap;
     uint32_t vfe_module_cfg;
+    uint32_t vfe_clk_rate;
+    uint16_t vfe_cfg_off;
+    uint16_t vfe_dmux_cfg;
     uint8_t uses_sensor_ctrls;
     uint8_t stats_enable;
+    uint8_t csi_dev;
 };
+
+
+/* For legacy Camera Serial Interface */
+enum msm_camera_csic_data_format {
+    CSIC_8BIT,
+    CSIC_10BIT,
+    CSIC_12BIT,
+};
+
+struct msm_camera_csic_params {
+    enum msm_camera_csic_data_format data_format;
+    uint8_t lane_cnt;
+    uint8_t lane_assign;
+    uint8_t settle_cnt;
+    uint8_t dpcm_scheme;
+};
+
+enum csic_cfg_type_t {
+    CSIC_INIT,
+    CSIC_CFG,
+    CSIC_RELEASE,
+};
+
+struct csic_cfg_data {
+    enum csic_cfg_type_t cfgtype;
+    struct msm_camera_csic_params *csic_params;
+};
+
+#define MSM_CAMERA_SUBDEV_CSIC 15
+#define VIDIOC_MSM_CSIC_IO_CFG  _IOWR('V', BASE_VIDIOC_PRIVATE + 4, struct csic_cfg_data)
+#define VIDIOC_MSM_CSIC_RELEASE _IOWR('V', BASE_VIDIOC_PRIVATE + 5, struct v4l2_subdev)
 
 #endif

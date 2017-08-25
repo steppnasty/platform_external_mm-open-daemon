@@ -1,5 +1,5 @@
 /*
-   Copyright (C) 2014-2016 Brian Stepp 
+   Copyright (C) 2014-2017 Brian Stepp 
       steppnasty@gmail.com
 
    This program is free software; you can redistribute it and/or
@@ -62,7 +62,7 @@ static void mm_daemon_server_config_cmd(mm_daemon_obj_t *mm_obj, uint8_t cmd,
     memset(&pipe_cmd, 0, sizeof(pipe_cmd));
     pipe_cmd.cmd = cmd;
     pipe_cmd.val = stream_id;
-    len = write(mm_obj->cfg_pfds[1], &pipe_cmd, sizeof(pipe_cmd));
+    len = write(mm_obj->cfg->pfds[1], &pipe_cmd, sizeof(pipe_cmd));
     if (len < 1)
         ALOGI("%s: write error", __FUNCTION__);
 }
@@ -82,6 +82,7 @@ static void mm_daemon_server_find_subdev(mm_daemon_sd_obj_t *sd)
         {MM_CONFIG_NAME, MSM_CAMERA_SUBDEV_VFE, MEDIA_ENT_T_V4L2_SUBDEV},
         {MM_CONFIG_NAME, MSM_CAMERA_SUBDEV_SENSOR, MEDIA_ENT_T_V4L2_SUBDEV},
         {MM_CONFIG_NAME, MSM_CAMERA_SUBDEV_BUF_MNGR, MEDIA_ENT_T_V4L2_SUBDEV},
+        {MM_CONFIG_NAME, MSM_CAMERA_SUBDEV_CSIC, MEDIA_ENT_T_V4L2_SUBDEV},
     };
 
     for (i = 0; i < ARRAY_SIZE(subdevs); i++) {
@@ -124,91 +125,81 @@ static void mm_daemon_server_find_subdev(mm_daemon_sd_obj_t *sd)
                     snprintf(subdev_name, sizeof(subdev_name), "/dev/%s",
                             entity.name);
                     switch (group_id) {
-                        case QCAMERA_VNODE_GROUP_ID:
-                            if (strncmp(dev_info.model, MM_CAMERA_NAME,
-                                    sizeof(dev_info.model)) == 0) {
-                                if (sd->num_cameras < MSM_MAX_CAMERA_SENSORS) {
-                                    snprintf(sd->camera_sd[sd->num_cameras].devpath,
-                                            sizeof(subdev_name), "%s", subdev_name);
-                                    sd->num_cameras++;
-                                }
-                            } else if (strncmp(dev_info.model, MM_CONFIG_NAME,
-                                    sizeof(dev_info.model)) == 0) {
-                                snprintf(sd->msm_sd.devpath,
+                    case QCAMERA_VNODE_GROUP_ID:
+                        if (strncmp(dev_info.model, MM_CAMERA_NAME,
+                                sizeof(dev_info.model)) == 0) {
+                            if (sd->num_cameras < MSM_MAX_CAMERA_SENSORS) {
+                                sd->camera_sd[sd->num_cameras].type = MM_SOCK;
+                                snprintf(sd->camera_sd[sd->num_cameras].devpath,
                                         sizeof(subdev_name), "%s", subdev_name);
+                                mm_daemon_sock_load(
+                                        &sd->camera_sd[sd->num_cameras]);
+                                sd->num_cameras++;
                             }
-                            break;
-                        case MSM_CAMERA_SUBDEV_VFE:
-                            snprintf(sd->vfe_sd.devpath, sizeof(subdev_name),
-                                    "%s", subdev_name);
-                            break;
-                        case MSM_CAMERA_SUBDEV_SENSOR:
-                            if (sd->num_sensors < MSM_MAX_CAMERA_SENSORS) {
-                                snprintf(sd->sensor_sd[sd->num_sensors].devpath,
-                                        sizeof(subdev_name), "%s", subdev_name);
-                                sd->num_sensors++;
-                            }
-                            break;
-                        case MSM_CAMERA_SUBDEV_BUF_MNGR:
-                            snprintf(sd->buf_sd.devpath, sizeof(subdev_name),
-                                    "%s", subdev_name);
-                            break;
-                        default:
-                            break;
+                        } else if (strncmp(dev_info.model, MM_CONFIG_NAME,
+                                sizeof(dev_info.model)) == 0) {
+                            sd->msm_sd.type = MM_CFG;
+                            snprintf(sd->msm_sd.devpath,
+                                    sizeof(subdev_name), "%s", subdev_name);
+                        }
+                        break;
+                    case MSM_CAMERA_SUBDEV_VFE:
+                        sd->vfe_sd.type = MM_VFE;
+                        snprintf(sd->vfe_sd.devpath, sizeof(subdev_name),
+                                "%s", subdev_name);
+                        break;
+                    case MSM_CAMERA_SUBDEV_SENSOR:
+                        if (sd->num_sensors < MSM_MAX_CAMERA_SENSORS) {
+                            sd->sensor_sd[sd->num_sensors].type = MM_SNSR;
+                            snprintf(sd->sensor_sd[sd->num_sensors].devpath,
+                                    sizeof(subdev_name), "%s", subdev_name);
+                            mm_daemon_sensor_load(
+                                 &sd->sensor_sd[sd->num_sensors],
+                                 &sd->csi[sd->num_sensors]);
+                            sd->num_sensors++;
+                        }
+                        break;
+                    case MSM_CAMERA_SUBDEV_BUF_MNGR:
+                        sd->buf.type = MM_BUF;
+                        snprintf(sd->buf.devpath, sizeof(subdev_name),
+                                "%s", subdev_name);
+                        break;
+                    case MSM_CAMERA_SUBDEV_CSIPHY:
+                        if (sd->num_csi < MSM_MAX_CAMERA_SENSORS) {
+                            sd->csi[sd->num_csi].type = MM_CSIPHY;
+                            snprintf(sd->csi[sd->num_csi].devpath,
+                                    sizeof(subdev_name), "%s", subdev_name);
+                            mm_daemon_csi_load(&sd->csi[sd->num_csi]);
+                            sd->num_csi++;
+                        }
+                        break;
+                    case MSM_CAMERA_SUBDEV_CSID:
+                        if (sd->num_csi < MSM_MAX_CAMERA_SENSORS) {
+                            sd->csi[sd->num_csi].type = MM_CSID;
+                            snprintf(sd->csi[sd->num_csi].devpath,
+                                    sizeof(subdev_name), "%s", subdev_name);
+                            mm_daemon_csi_load(&sd->csi[sd->num_csi]);
+                            sd->num_csi++;
+                        }
+                        break;
+                    case MSM_CAMERA_SUBDEV_CSIC:
+                        if (sd->num_csi < MSM_MAX_CAMERA_SENSORS) {
+                            sd->csi[sd->num_csi].type = MM_CSIC;
+                            snprintf(sd->csi[sd->num_csi].devpath,
+                                    sizeof(subdev_name), "%s", subdev_name);
+                            mm_daemon_csi_load(&sd->csi[sd->num_csi]);
+                            sd->num_csi++;
+                        }
+                        break;
+                    default:
+                        break;
                     }
                 }
             }
         }
-        if (dev_fd > 0)
+        if (dev_fd)
             close(dev_fd);
         dev_fd = 0;
-    }
-}
-
-static int mm_daemon_server_get_sinfo(mm_daemon_sd_obj_t *sd)
-{
-    int i;
-
-    for (i = 0; i < sd->num_sensors; i++) {
-        int cam_fd;
-        struct sensorb_cfg_data cdata;
-        mm_daemon_subdev *subdev = &sd->sensor_sd[i];
-
-        cam_fd = open(subdev->devpath, O_RDWR | O_NONBLOCK);
-        if (cam_fd < 0)
-            return -ENODEV;
-        cdata.cfgtype = CFG_GET_SENSOR_INFO;
-        if (ioctl(cam_fd, VIDIOC_MSM_SENSOR_CFG, &cdata) < 0) {
-            close(cam_fd);
-            return -ENODEV;
-        }
-        snprintf(subdev->devname, sizeof(subdev->devname), "%s",
-                cdata.cfg.sensor_info.sensor_name);
-        close(cam_fd);
-    }
-    return 1;
-}
-
-static void mm_daemon_server_load_sensor(mm_daemon_sd_obj_t *sd)
-{
-    int i;
-
-    for (i = 0; i < sd->num_sensors; i++) {
-        char path[PATH_MAX];
-        void *handle;
-        const char *sym = "sensor_cfg_obj";
-
-        snprintf(path, PATH_MAX, "/system/lib/libmmdaemon_%s.so",
-                sd->sensor_sd[i].devname);
-        handle = dlopen(path, RTLD_NOW);
-        if (handle == NULL) {
-            char const *err_str = dlerror();
-            ALOGE("Error loading %s: %s", path, err_str?err_str:"unknown");
-            break;
-        }
-        sd->sensor_sd[i].handle = handle;
-
-        sd->sensor_sd[i].data = dlsym(handle, sym);
     }
 }
 
@@ -228,7 +219,7 @@ static void mm_daemon_notify(mm_daemon_sd_obj_t *sd)
     }
     msm_evt = (struct msm_v4l2_event_data *)ev.u.data;
 
-    if (ev.id != MSM_CAMERA_NEW_SESSION && mm_obj->cfg_state == STATE_STOPPED) {
+    if (ev.id != MSM_CAMERA_NEW_SESSION && mm_obj->cfg == NULL) {
         ALOGE("ERROR: Unable to handle command without active config thread");
         if (mm_obj->cfg_shutdown)
             goto cmd_ack;
@@ -242,18 +233,19 @@ static void mm_daemon_notify(mm_daemon_sd_obj_t *sd)
     }
     switch (ev.id) {
         case MSM_CAMERA_NEW_SESSION:
+            if (mm_obj->cfg)
+                break;
             mm_obj->session_id = msm_evt->session_id;
             mm_obj->stream_id = msm_evt->stream_id;
-            pthread_mutex_lock(&mm_obj->mutex);
-            mm_daemon_config_open(sd);
-            pthread_cond_wait(&mm_obj->cond, &mm_obj->mutex);
-            pthread_mutex_unlock(&mm_obj->mutex);
+            mm_obj->cfg = mm_daemon_config_open(sd, msm_evt->session_id,
+                    mm_obj->svr_pfds[1]);
             status = MSM_CAMERA_CMD_SUCESS;
             break;
         case MSM_CAMERA_DEL_SESSION:
             mm_daemon_server_config_cmd(mm_obj, CFG_CMD_SHUTDOWN,
                     msm_evt->stream_id);
-            mm_daemon_config_close(mm_obj);
+            mm_daemon_config_close(mm_obj->cfg);
+            mm_obj->cfg = NULL;
             status = MSM_CAMERA_CMD_SUCESS;
             break;
         case MSM_CAMERA_SET_PARM:
@@ -268,9 +260,13 @@ static void mm_daemon_notify(mm_daemon_sd_obj_t *sd)
                     break;
                 case MSM_CAMERA_PRIV_NEW_STREAM:
                     mm_obj->stream_id = msm_evt->stream_id;
-                    if (msm_evt->stream_id > 0)
+                    if (msm_evt->stream_id > 0) {
+                        pthread_mutex_lock(&mm_obj->cfg->lock);
                         mm_daemon_server_config_cmd(mm_obj, CFG_CMD_NEW_STREAM,
                                 msm_evt->stream_id);
+                        pthread_cond_wait(&mm_obj->cfg->cond, &mm_obj->cfg->lock);
+                        pthread_mutex_unlock(&mm_obj->cfg->lock);
+                    }
                     break;
                 case MSM_CAMERA_PRIV_DEL_STREAM:
                     if (msm_evt->stream_id > 0)
@@ -296,7 +292,7 @@ static void mm_daemon_notify(mm_daemon_sd_obj_t *sd)
         case MSM_CAMERA_GET_PARM:
             switch (msm_evt->command) {
                 case MSM_CAMERA_PRIV_QUERY_CAP:
-                    if (mm_obj->cap_buf.mapped) {
+                    if (mm_obj->cap_buf_mapped) {
                         status = MSM_CAMERA_CMD_SUCESS;
                     } else
                         ALOGE("%s: Error: Capability buffer not mapped",
@@ -323,14 +319,18 @@ static int mm_daemon_server_pipe_cmd(mm_daemon_obj_t *mm_obj)
 
     read_len = read(mm_obj->svr_pfds[0], &pipe_cmd, sizeof(pipe_cmd));
     switch (pipe_cmd.cmd) {
-        case SERVER_CMD_MAP_UNMAP_DONE:
-            mm_daemon_pack_event(mm_obj, &ev, CAM_EVENT_TYPE_MAP_UNMAP_DONE,
-                    MSM_CAMERA_MSM_NOTIFY, pipe_cmd.val,
-                    MSM_CAMERA_STATUS_SUCCESS);
-            rc = ioctl(mm_obj->server_fd, MSM_CAM_V4L2_IOCTL_NOTIFY, &ev);
-            break;
-        default:
-            ALOGI("%s: Unknown command on pipe", __FUNCTION__);
+    case SERVER_CMD_MAP_UNMAP_DONE:
+        mm_daemon_pack_event(mm_obj, &ev, CAM_EVENT_TYPE_MAP_UNMAP_DONE,
+                MSM_CAMERA_MSM_NOTIFY, pipe_cmd.val,
+                MSM_CAMERA_STATUS_SUCCESS);
+        rc = ioctl(mm_obj->server_fd, MSM_CAM_V4L2_IOCTL_NOTIFY, &ev);
+        break;
+    case SERVER_CMD_CAP_BUF_MAP:
+        mm_obj->cap_buf_mapped = pipe_cmd.val;
+        break;
+    default:
+        ALOGI("%s: Unknown command on pipe", __FUNCTION__);
+        break;
     }
     return rc;
 }
@@ -407,18 +407,7 @@ static int mm_daemon_open()
 
     sd->mm_obj = mm_obj;
 
-    pthread_mutex_init(&(mm_obj->mutex), NULL);
-    pthread_mutex_init(&(mm_obj->cfg_lock), NULL);
-    pthread_cond_init(&(mm_obj->cond), NULL);
-
     mm_daemon_server_find_subdev(sd);
-
-    if (!(mm_daemon_server_get_sinfo(sd))) {
-        ALOGE("Error: failed to extract sensor info");
-        goto server_error;
-    }
-
-    mm_daemon_server_load_sensor(sd);
 
     /* Open the server device */
     do {
@@ -453,9 +442,6 @@ error:
         mm_obj->server_fd = 0;
     }
 server_error:
-    pthread_mutex_destroy(&(mm_obj->mutex));
-    pthread_cond_destroy(&(mm_obj->cond));
-    pthread_mutex_destroy(&(mm_obj->cfg_lock));
     free(sd);
 tdata_error:
     free(mm_obj);

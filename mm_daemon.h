@@ -1,5 +1,5 @@
 /*
-   Copyright (C) 2014-2016 Brian Stepp 
+   Copyright (C) 2014-2017 Brian Stepp 
       steppnasty@gmail.com
 
    This program is free software; you can redistribute it and/or
@@ -63,44 +63,77 @@
 struct mm_daemon_obj;
 
 typedef enum {
-    STATE_STOPPED,
+    STATE_INIT = 1,
     STATE_POLL,
+    STATE_LOCKED,
     STATE_BUSY,
+    STATE_STOPPED,
     STATE_MAX
-} mm_daemon_state_type_t;
+} mm_daemon_thread_state;
 
 typedef enum {
-    SOCKET_STATE_DISCONNECTED,
-    SOCKET_STATE_CONNECTED,
-    SOCKET_STATE_MAX
-} mm_daemon_socket_state_t;
+    MM_CSIPHY = 1,
+    MM_CSID,
+    MM_CSIC,
+    MM_CCI,
+    MM_ISPIF,
+    MM_VFE,
+    MM_AXI,
+    MM_VPE,
+    MM_SNSR,
+    MM_ACT,
+    MM_EEPROM,
+    MM_CPP,
+    MM_LED,
+    MM_STROBE,
+    MM_BUF,
+    MM_CFG,
+    MM_SOCK,
+} mm_daemon_subdev_type;
 
+struct mm_dameon_thread_ops;
 typedef struct {
     char *devpath;
     int32_t pfds[2];
+    int32_t cb_pfd;
     void *data;
-    void *mm_snsr;
+    void *obj;
+    uint8_t sid;
+    uint8_t type;
     pthread_t pid;
     pthread_mutex_t lock;
     pthread_cond_t cond;
-    mm_daemon_state_type_t state;
+    mm_daemon_thread_state state;
+    struct mm_daemon_thread_ops *ops;
 } mm_daemon_thread_info;
+
+enum mm_daemon_thread_type {
+    SOCK_DEV,
+    SNSR_DEV,
+    CSI_DEV,
+    VFE_DEV,
+    BUF_DEV,
+    MAX_DEV,
+};   
 
 typedef struct {
     char devpath[32];
-    char devname[32];
     void *handle;
     void *data;
-} mm_daemon_subdev;
+    void *ops;
+    uint8_t type;
+} mm_daemon_sd_info;
 
 typedef struct {
     uint8_t num_cameras;
     uint8_t num_sensors;
-    mm_daemon_subdev camera_sd[MSM_MAX_CAMERA_SENSORS];
-    mm_daemon_subdev sensor_sd[MSM_MAX_CAMERA_SENSORS];
-    mm_daemon_subdev msm_sd;
-    mm_daemon_subdev vfe_sd;
-    mm_daemon_subdev buf_sd;
+    uint8_t num_csi;
+    mm_daemon_sd_info camera_sd[MSM_MAX_CAMERA_SENSORS];
+    mm_daemon_sd_info sensor_sd[MSM_MAX_CAMERA_SENSORS];
+    mm_daemon_sd_info csi[MSM_MAX_CAMERA_SENSORS];
+    mm_daemon_sd_info msm_sd;
+    mm_daemon_sd_info vfe_sd;
+    mm_daemon_sd_info buf;
     struct mm_daemon_obj *mm_obj;
 } mm_daemon_sd_obj_t;
 
@@ -155,8 +188,10 @@ typedef struct mm_daemon_cfg {
     int32_t buf_fd;
     mm_daemon_buf_info *stream_buf[MAX_NUM_STREAM];
     mm_daemon_stats_buf_info *stats_buf[MSM_ISP_STATS_MAX];
-    mm_daemon_thread_info *snsr;
+    mm_daemon_thread_info *cfg;
+    mm_daemon_thread_info *info[MAX_DEV];
     mm_daemon_parm_buf_info parm_buf;
+    mm_daemon_cap_buf_info cap_buf;
     struct mm_sensor_data *sdata;
     uint32_t curr_gain;
     uint32_t curr_line;
@@ -176,46 +211,38 @@ typedef struct mm_daemon_cfg {
     pthread_cond_t cond;
 } mm_daemon_cfg_t;
 
-typedef struct mm_daemon_socket {
-    pthread_t pid;
-    int sock_fd;
-    struct mm_daemon_obj *daemon_obj;
-    mm_daemon_cfg_t *cfg_obj;
-    struct sockaddr_un sock_addr;
-    mm_daemon_socket_state_t state;
-    int dev_id;
-} mm_daemon_socket_t;
-
 typedef struct mm_daemon_obj {
     int32_t server_fd;
-    mm_daemon_state_type_t state;
-    mm_daemon_state_type_t cfg_state;
-    pthread_mutex_t mutex;
-    pthread_mutex_t lock;
-    pthread_mutex_t cfg_lock;
-    pthread_cond_t cond;
-    pthread_t cfg_pid;
-    int32_t cfg_pfds[2];
+    mm_daemon_thread_info *cfg;
+    mm_daemon_thread_state state;
     int32_t svr_pfds[2];
-    mm_daemon_cap_buf_info cap_buf;
     unsigned int session_id;
     unsigned int stream_id;
     uint8_t cfg_shutdown;
+    uint8_t cap_buf_mapped;
 } mm_daemon_obj_t;
 
 typedef enum {
     CFG_CMD_STREAM_START = 1,
     CFG_CMD_STREAM_STOP,
-    CFG_CMD_MAP_UNMAP_DONE,
     CFG_CMD_NEW_STREAM,
     CFG_CMD_DEL_STREAM,
     CFG_CMD_PARM,
     CFG_CMD_VFE_REG,
     CFG_CMD_SHUTDOWN,
+
+    CFG_CMD_MAP_UNMAP_DONE,
+    CFG_CMD_SK_PKT_MAP,
+    CFG_CMD_SK_PKT_UNMAP,
+    CFG_CMD_SK_ERR,
+
+    CFG_CMD_CSI_ERR,
+    CFG_CMD_ERR,
 } mm_daemon_cfg_cmd_t;
 
 typedef enum {
     SERVER_CMD_MAP_UNMAP_DONE = 1,
+    SERVER_CMD_CAP_BUF_MAP,
 } mm_daemon_server_cmd_t;
 
 typedef struct {
@@ -223,9 +250,10 @@ typedef struct {
     uint32_t val;
 } mm_daemon_pipe_evt_t;
 
-int mm_daemon_config_open(mm_daemon_sd_obj_t *sd);
-int mm_daemon_config_close(mm_daemon_obj_t *mm_obj);
-mm_daemon_socket_t *mm_daemon_socket_create(mm_daemon_sd_obj_t *sd, uint8_t cam_idx);
-int mm_daemon_sock_open(mm_daemon_socket_t *mm_sock);
-void mm_daemon_sock_close(mm_daemon_socket_t *mm_sock);
+void mm_daemon_sock_load(mm_daemon_sd_info *sd);
+void mm_daemon_csi_load(mm_daemon_sd_info *sd);
+void mm_daemon_sensor_load(mm_daemon_sd_info *snsr, mm_daemon_sd_info *camif);
+mm_daemon_thread_info *mm_daemon_config_open(mm_daemon_sd_obj_t *sd,
+        uint8_t session_id, int32_t cb_pfd);
+int mm_daemon_config_close(mm_daemon_thread_info *info);
 #endif // MM_DAEMON_H

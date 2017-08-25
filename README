@@ -1,4 +1,4 @@
-README for mm-open-daemon - June 28, 2016.
+README for mm-open-daemon - August 25, 2017.
 
 This program is intended as a open source substitute for mm-qcamera-daemon.
 
@@ -19,3 +19,4 @@ Sensor Models:
 --------------
 S5K4E1GX
 MT9V113
+IMX105

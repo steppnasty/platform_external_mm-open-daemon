@@ -1,5 +1,5 @@
 /*
-   Copyright (C) 2014-2017 Brian Stepp 
+   Copyright (C) 2017 Brian Stepp 
       steppnasty@gmail.com
 
    This program is free software; you can redistribute it and/or
@@ -20,41 +20,25 @@
    The GNU General Public License is contained in the file COPYING.
 */
 
-#ifndef MM_DAEMON_SENSOR_H
-#define MM_DAEMON_SENSOR_H
+#ifndef MM_DAEMON_CSI_H
+#define MM_DAEMON_CSI_H
 
 #include "mm_daemon.h"
-#include "sensors/mm_sensor.h"
-
-#define DEFAULT_EXP_GAIN 0x20
 
 typedef enum {
-    SENSOR_CMD_SHUTDOWN,
-    SENSOR_CMD_PREVIEW,
-    SENSOR_CMD_SNAPSHOT,
-    SENSOR_CMD_GAIN_UPDATE,
-    SENSOR_CMD_EXP_GAIN,
-    SENSOR_CMD_AB,
-    SENSOR_CMD_WB,
-    SENSOR_CMD_BRIGHTNESS,
-    SENSOR_CMD_SATURATION,
-    SENSOR_CMD_CONTRAST,
-    SENSOR_CMD_EFFECT,
-    SENSOR_CMD_SHARPNESS,
-    SENSOR_CMD_POWER_UP,
-} mm_daemon_sensor_cmd_t;
+    CSI_CMD_SHUTDOWN,
+    CSI_CMD_CFG,
+    CSI_CMD_SET_PARAMS,
+} mm_daemon_csi_cmd_t;
 
 typedef enum {
-    SENSOR_POWER_OFF,
-    SENSOR_POWER_ON,
-} mm_daemon_sensor_state_t;
+    CSI_POWER_OFF,
+    CSI_POWER_ON,
+} mm_daemon_csi_state_t;
 
-typedef struct mm_daemon_sensor {
-    int cam_fd;
-    uint16_t lines;
-    mm_daemon_cfg_t *cfg_obj;
-    mm_daemon_thread_info *info;
-    mm_daemon_sensor_state_t sensor_state;
-    mm_sensor_cfg_t *cfg;
-} mm_daemon_sensor_t;
-#endif
+typedef struct mm_daemon_csi {
+    int fd;
+    mm_daemon_csi_state_t state;
+    struct msm_camera_csic_params *params;
+} mm_daemon_csi_t;
+#endif /* MM_DAEMON_CSI_H */

@@ -1,5 +1,5 @@
 /*
-   Copyright (C) 2016 Brian Stepp 
+   Copyright (C) 2016-2017 Brian Stepp 
       steppnasty@gmail.com
 
    This program is free software; you can redistribute it and/or
@@ -132,22 +132,20 @@ static struct msm_camera_i2c_reg_array s5k4e1gx_stop_settings[] = {
 
 static int s5k4e1gx_stream_start(mm_sensor_cfg_t *cfg)
 {
-    enum msm_camera_i2c_reg_addr_type dt = MSM_CAMERA_I2C_BYTE_ADDR;
-
+    enum msm_camera_i2c_data_type dt = MSM_CAMERA_I2C_BYTE_DATA;
     return cfg->ops->i2c_write(cfg->mm_snsr, 0x0100, 0x01, dt);
 }
 
 static int s5k4e1gx_stream_stop(mm_sensor_cfg_t *cfg)
 {
-    enum msm_camera_i2c_reg_addr_type dt = MSM_CAMERA_I2C_BYTE_ADDR;
-
+    enum msm_camera_i2c_data_type dt = MSM_CAMERA_I2C_BYTE_DATA;
     return cfg->ops->i2c_write(cfg->mm_snsr, 0x0100, 0x00, dt);
 }
 
 static void s5k4e1gx_exp_gain(mm_sensor_cfg_t *cfg, uint16_t gain)
 {
     struct s5k4e1gx_pdata *pdata = (struct s5k4e1gx_pdata *)cfg->pdata;
-    enum msm_camera_i2c_reg_addr_type dt = MSM_CAMERA_I2C_BYTE_ADDR;
+    enum msm_camera_i2c_data_type dt = MSM_CAMERA_I2C_BYTE_DATA;
     uint8_t min_legal_gain = 0x20;
     uint16_t max_legal_gain = 0x200;
     uint16_t min_line;
@@ -213,13 +211,13 @@ static void s5k4e1gx_exp_gain(mm_sensor_cfg_t *cfg, uint16_t gain)
 static int s5k4e1gx_init(mm_sensor_cfg_t *cfg)
 {
     int rc = -1;
-    struct s5k4e1gx_pdata *pdata;
-    enum msm_camera_i2c_reg_addr_type dt = MSM_CAMERA_I2C_BYTE_ADDR;
+    //struct s5k4e1gx_pdata *pdata;
+    enum msm_camera_i2c_data_type dt = MSM_CAMERA_I2C_BYTE_DATA;
 
     cfg->pdata = calloc(1, sizeof(struct s5k4e1gx_pdata));
     if (!cfg->pdata)
         return -1;
-    pdata = (struct s5k4e1gx_pdata *)cfg->pdata;
+    //pdata = (struct s5k4e1gx_pdata *)cfg->pdata;
 
     rc = cfg->ops->i2c_write_array(cfg->mm_snsr,
             &s5k4e1gx_init_settings[0],
@@ -229,8 +227,10 @@ static int s5k4e1gx_init(mm_sensor_cfg_t *cfg)
 
 static int s5k4e1gx_deinit(mm_sensor_cfg_t *cfg)
 {
-    if (cfg->pdata)
+    if (cfg->pdata) {
         free(cfg->pdata);
+        cfg->pdata = NULL;
+    }
     return 0;
 }
 
@@ -238,7 +238,7 @@ static int s5k4e1gx_preview(mm_sensor_cfg_t *cfg)
 {
     int rc = -1;
     struct s5k4e1gx_pdata *pdata = (struct s5k4e1gx_pdata *)cfg->pdata;
-    enum msm_camera_i2c_reg_addr_type dt = MSM_CAMERA_I2C_BYTE_ADDR;
+    enum msm_camera_i2c_data_type dt = MSM_CAMERA_I2C_BYTE_DATA;
 
     pdata->mode = PREVIEW;
     pdata->line = 487;
@@ -257,7 +257,7 @@ static int s5k4e1gx_snapshot(mm_sensor_cfg_t *cfg)
 {
     int rc = -1;
     struct s5k4e1gx_pdata *pdata = (struct s5k4e1gx_pdata *)cfg->pdata;
-    enum msm_camera_i2c_reg_addr_type dt = MSM_CAMERA_I2C_BYTE_ADDR;
+    enum msm_camera_i2c_data_type dt = MSM_CAMERA_I2C_BYTE_DATA;
 
     pdata->mode = SNAPSHOT;
     s5k4e1gx_stream_stop(cfg);
@@ -300,20 +300,6 @@ struct mm_sensor_ops s5k4e1gx_ops = {
     .prev = &s5k4e1gx_preview,
     .snap = &s5k4e1gx_snapshot,
     .exp_gain = &s5k4e1gx_exp_gain,
-};
-
-static struct mm_sensor_attr s5k4e1gx_attr_preview = {
-    .h = 980,
-    .w = 1304,
-    .blk_l = 12,
-    .blk_p = 1434,
-};
-
-static struct mm_sensor_attr s5k4e1gx_attr_snapshot = {
-    .h = 1960,
-    .w = 2608,
-    .blk_l = 12,
-    .blk_p = 130,
 };
 
 static cam_capability_t s5k4e1gx_capabilities = {
@@ -409,17 +395,47 @@ static cam_capability_t s5k4e1gx_capabilities = {
     },
 };
 
+static struct mm_sensor_stream_attr s5k4e1gx_attr_preview = {
+    .ro_cfg = 0x18C5028,
+    .h = 980,
+    .w = 1304,
+    .blk_l = 12,
+    .blk_p = 1434,
+};
+
+static struct mm_sensor_stream_attr s5k4e1gx_attr_snapshot = {
+    .ro_cfg = 0xC4A251,
+    .h = 1960,
+    .w = 2608,
+    .blk_l = 12,
+    .blk_p = 130,
+};
+
+/* MIPI CSI Controller config */
+static struct msm_camera_csic_params s5k4e1gx_csic_params = {
+    .data_format = CSIC_10BIT,
+    .lane_cnt = 2,
+    .lane_assign = 0xE4,
+    .settle_cnt = 0x1E,
+    .dpcm_scheme = 0,
+};
+
 static struct mm_sensor_data s5k4e1gx_data = {
     .attr[PREVIEW] = &s5k4e1gx_attr_preview,
     .attr[SNAPSHOT] = &s5k4e1gx_attr_snapshot,
+    .csi_params = (void *)&s5k4e1gx_csic_params,
     .cap = &s5k4e1gx_capabilities,
     .vfe_module_cfg = 0x1E27C17,
+    .vfe_clk_rate = 122880000,
+    .vfe_cfg_off = 0x0211,
+    .vfe_dmux_cfg = 0x9CCA,
     .uses_sensor_ctrls = 0,
     .stats_enable = 1,
+    .csi_dev = 0,
 };
 
 mm_sensor_cfg_t sensor_cfg_obj = {
-    .init = &s5k4e1gx_init_regs,
+    //.init = &s5k4e1gx_init_regs,
     .prev = &s5k4e1gx_prev_regs,
     .snap = &s5k4e1gx_snap_regs,
     .stop_regs = &s5k4e1gx_stop_regs,

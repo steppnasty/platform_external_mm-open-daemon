@@ -1,5 +1,5 @@
 /*
-   Copyright (C) 2014-2017 Brian Stepp 
+   Copyright (C) 2016-2017 Brian Stepp 
       steppnasty@gmail.com
 
    This program is free software; you can redistribute it and/or
@@ -20,41 +20,16 @@
    The GNU General Public License is contained in the file COPYING.
 */
 
-#ifndef MM_DAEMON_SENSOR_H
-#define MM_DAEMON_SENSOR_H
-
 #include "mm_daemon.h"
-#include "sensors/mm_sensor.h"
 
-#define DEFAULT_EXP_GAIN 0x20
+struct mm_daemon_sk_pkt {
+    uint8_t cam_idx;
+    int fd;
+    void *data;
+};
 
-typedef enum {
-    SENSOR_CMD_SHUTDOWN,
-    SENSOR_CMD_PREVIEW,
-    SENSOR_CMD_SNAPSHOT,
-    SENSOR_CMD_GAIN_UPDATE,
-    SENSOR_CMD_EXP_GAIN,
-    SENSOR_CMD_AB,
-    SENSOR_CMD_WB,
-    SENSOR_CMD_BRIGHTNESS,
-    SENSOR_CMD_SATURATION,
-    SENSOR_CMD_CONTRAST,
-    SENSOR_CMD_EFFECT,
-    SENSOR_CMD_SHARPNESS,
-    SENSOR_CMD_POWER_UP,
-} mm_daemon_sensor_cmd_t;
-
-typedef enum {
-    SENSOR_POWER_OFF,
-    SENSOR_POWER_ON,
-} mm_daemon_sensor_state_t;
-
-typedef struct mm_daemon_sensor {
-    int cam_fd;
-    uint16_t lines;
-    mm_daemon_cfg_t *cfg_obj;
-    mm_daemon_thread_info *info;
-    mm_daemon_sensor_state_t sensor_state;
-    mm_sensor_cfg_t *cfg;
-} mm_daemon_sensor_t;
-#endif
+typedef struct mm_daemon_socket {
+    int dev_fd;
+    int dev_id;
+    struct sockaddr_un sock_addr;
+} mm_daemon_socket_t;

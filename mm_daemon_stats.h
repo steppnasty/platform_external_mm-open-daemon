@@ -1,5 +1,5 @@
 /*
-   Copyright (C) 2014-2016 Brian Stepp 
+   Copyright (C) 2014-2017 Brian Stepp 
       steppnasty@gmail.com
 
    This program is free software; you can redistribute it and/or
@@ -67,7 +67,7 @@ typedef struct mm_daemon_stats {
     enum msm_isp_stats_type type;
     mm_daemon_stats_done_work done_work;
     mm_daemon_stats_buf_info *stats_buf;
-    mm_daemon_state_type_t state;
+    mm_daemon_thread_state state;
 } mm_daemon_stats_t;
 
 int mm_daemon_stats_open(mm_daemon_cfg_t *cfg_obj, uint32_t stats_type);

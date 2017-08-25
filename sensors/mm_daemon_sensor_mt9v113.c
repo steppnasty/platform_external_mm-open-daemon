@@ -1,5 +1,5 @@
 /*
-   Copyright (C) 2016 Brian Stepp 
+   Copyright (C) 2016-2017 Brian Stepp 
       steppnasty@gmail.com
 
    This program is free software; you can redistribute it and/or
@@ -623,7 +623,7 @@ static struct msm_camera_i2c_reg_array mt9v113_snap_settings[] = {
 static int mt9v113_set_antibanding(mm_sensor_cfg_t *cfg, int mode)
 {
     int rc = -1;
-    enum msm_camera_i2c_reg_addr_type dt = MSM_CAMERA_I2C_WORD_ADDR;
+    enum msm_camera_i2c_data_type dt = MSM_CAMERA_I2C_WORD_DATA;
 
     switch (mode) {
         case CAM_ANTIBANDING_MODE_50HZ:
@@ -649,7 +649,7 @@ static int mt9v113_set_wb(mm_sensor_cfg_t *cfg, int wb_mode)
     uint16_t value;
     struct msm_camera_i2c_reg_setting setting;
     struct msm_camera_i2c_read_config read_config;
-    enum msm_camera_i2c_reg_addr_type dt = MSM_CAMERA_I2C_WORD_ADDR;
+    enum msm_camera_i2c_data_type dt = MSM_CAMERA_I2C_WORD_DATA;
 
     switch (wb_mode) {
         case CAM_WB_MODE_AUTO:
@@ -741,7 +741,7 @@ static int mt9v113_set_wb(mm_sensor_cfg_t *cfg, int wb_mode)
 static int mt9v113_set_brightness(mm_sensor_cfg_t *cfg, int mode)
 {
     int rc = -1;
-    enum msm_camera_i2c_reg_addr_type dt = MSM_CAMERA_I2C_WORD_ADDR;
+    enum msm_camera_i2c_data_type dt = MSM_CAMERA_I2C_WORD_DATA;
 
     switch (mode) {
         case BRIGHTNESS_N4:
@@ -802,7 +802,7 @@ static int mt9v113_set_ffc(mm_sensor_cfg_t *cfg,
 {
     int i, rc = 0;
     uint16_t value;
-    enum msm_camera_i2c_reg_addr_type dt = MSM_CAMERA_I2C_WORD_ADDR;
+    enum msm_camera_i2c_data_type dt = MSM_CAMERA_I2C_WORD_DATA;
 
     switch (mode) {
         case MIRROR:
@@ -851,7 +851,7 @@ static int mt9v113_set_saturation(mm_sensor_cfg_t *cfg, int value)
 {
     int rc;
     int mode = value/2;
-    enum msm_camera_i2c_reg_addr_type dt = MSM_CAMERA_I2C_WORD_ADDR;
+    enum msm_camera_i2c_data_type dt = MSM_CAMERA_I2C_WORD_DATA;
 
     switch (mode) {
         case SATURATION_X0:
@@ -891,7 +891,7 @@ static int mt9v113_set_contrast(mm_sensor_cfg_t *cfg, int value)
 {
    int rc = -1;
    int mode = value/2;
-   enum msm_camera_i2c_reg_addr_type dt = MSM_CAMERA_I2C_WORD_ADDR;
+   enum msm_camera_i2c_data_type dt = MSM_CAMERA_I2C_WORD_DATA;
 
    switch (mode) {
        case CONTRAST_N2:
@@ -933,7 +933,7 @@ static int mt9v113_set_effect(mm_sensor_cfg_t *cfg, int mode)
     int i;
     unsigned short reg_value;
     int rc = -1;
-    enum msm_camera_i2c_reg_addr_type dt = MSM_CAMERA_I2C_WORD_ADDR;
+    enum msm_camera_i2c_data_type dt = MSM_CAMERA_I2C_WORD_DATA;
 
     if (pre_effect == mode)
         return 0;
@@ -988,7 +988,7 @@ static int mt9v113_set_sharpness(mm_sensor_cfg_t *cfg, int value)
 {
     int rc = -1;
     int mode = value/5;
-    enum msm_camera_i2c_reg_addr_type dt = MSM_CAMERA_I2C_WORD_ADDR;
+    enum msm_camera_i2c_data_type dt = MSM_CAMERA_I2C_WORD_DATA;
 
     switch (mode) {
         case SHARPNESS_X0:
@@ -1028,7 +1028,7 @@ static int mt9v113_preview(mm_sensor_cfg_t *cfg)
 {
     int i, rc;
     uint16_t value;
-    enum msm_camera_i2c_reg_addr_type dt = MSM_CAMERA_I2C_WORD_ADDR;
+    enum msm_camera_i2c_data_type dt = MSM_CAMERA_I2C_WORD_DATA;
 
     rc = mt9v113_set_antibanding(cfg, CAM_ANTIBANDING_MODE_AUTO);
     if (rc < 0)
@@ -1070,7 +1070,7 @@ static int mt9v113_snapshot(mm_sensor_cfg_t *cfg)
 {
     int i;
     uint16_t value;
-    enum msm_camera_i2c_reg_addr_type dt = MSM_CAMERA_I2C_WORD_ADDR;
+    enum msm_camera_i2c_data_type dt = MSM_CAMERA_I2C_WORD_DATA;
 
     if (cfg->ops->i2c_write(cfg->mm_snsr, 0x098C, 0xA103, dt) < 0)
         return -1;
@@ -1129,7 +1129,7 @@ struct mm_sensor_ops mt9v113_ops = {
     .sharpness = &mt9v113_set_sharpness,
 };
 
-static struct mm_sensor_attr mt9v113_attr = {
+static struct mm_sensor_stream_attr mt9v113_attr = {
     .h = 480,
     .w = 640,
     .blk_l = 0,
@@ -1237,11 +1237,24 @@ static cam_capability_t mt9v113_capabilities = {
     },
 };
 
+/* MIPI CSI Controller config */
+static struct msm_camera_csic_params mt9v113_csic_params = {
+    .data_format = CSIC_8BIT,
+    .lane_cnt = 1,
+    .lane_assign = 0xE4,
+    .settle_cnt = 0x14,
+    .dpcm_scheme = 0,
+};
+
 static struct mm_sensor_data mt9v113_data = {
     .attr[PREVIEW] = &mt9v113_attr,
     .attr[SNAPSHOT] = &mt9v113_attr,
+    .csi_params = (void *)&mt9v113_csic_params,
+    .csi_dev = 1,
     .cap = &mt9v113_capabilities,
     .vfe_module_cfg = 0x1C00C0C,
+    .vfe_clk_rate = 228570000,
+    .vfe_cfg_off = 0x0214,
     .uses_sensor_ctrls = 1,
     .stats_enable = 0,
 };

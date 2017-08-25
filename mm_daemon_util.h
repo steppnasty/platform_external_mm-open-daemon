@@ -1,5 +1,5 @@
 /*
-   Copyright (C) 2014-2017 Brian Stepp 
+   Copyright (C) 2017 Brian Stepp 
       steppnasty@gmail.com
 
    This program is free software; you can redistribute it and/or
@@ -19,42 +19,20 @@
 
    The GNU General Public License is contained in the file COPYING.
 */
-
-#ifndef MM_DAEMON_SENSOR_H
-#define MM_DAEMON_SENSOR_H
+#ifndef MM_DAEMON_UTIL_H
+#define MM_DAEMON_UTIL_H
 
 #include "mm_daemon.h"
-#include "sensors/mm_sensor.h"
 
-#define DEFAULT_EXP_GAIN 0x20
+struct mm_daemon_thread_ops {
+    void *(*thread)(void *data);
+    void (*stop)(mm_daemon_thread_info *info);
+};
 
-typedef enum {
-    SENSOR_CMD_SHUTDOWN,
-    SENSOR_CMD_PREVIEW,
-    SENSOR_CMD_SNAPSHOT,
-    SENSOR_CMD_GAIN_UPDATE,
-    SENSOR_CMD_EXP_GAIN,
-    SENSOR_CMD_AB,
-    SENSOR_CMD_WB,
-    SENSOR_CMD_BRIGHTNESS,
-    SENSOR_CMD_SATURATION,
-    SENSOR_CMD_CONTRAST,
-    SENSOR_CMD_EFFECT,
-    SENSOR_CMD_SHARPNESS,
-    SENSOR_CMD_POWER_UP,
-} mm_daemon_sensor_cmd_t;
-
-typedef enum {
-    SENSOR_POWER_OFF,
-    SENSOR_POWER_ON,
-} mm_daemon_sensor_state_t;
-
-typedef struct mm_daemon_sensor {
-    int cam_fd;
-    uint16_t lines;
-    mm_daemon_cfg_t *cfg_obj;
-    mm_daemon_thread_info *info;
-    mm_daemon_sensor_state_t sensor_state;
-    mm_sensor_cfg_t *cfg;
-} mm_daemon_sensor_t;
-#endif
+mm_daemon_thread_info *mm_daemon_util_thread_open(mm_daemon_sd_info *sd,
+        uint8_t cam_idx, int32_t cb_pfd);
+int mm_daemon_util_thread_close(mm_daemon_thread_info *info);
+int mm_daemon_util_set_thread_state(mm_daemon_thread_info *info,
+        mm_daemon_thread_state state);
+void mm_daemon_util_pipe_cmd(int32_t pfd, uint8_t cmd, int32_t val);
+#endif /* MM_DAEMON_UTIL_H */
