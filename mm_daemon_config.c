@@ -2628,24 +2628,6 @@ static int mm_daemon_config_vfe_mce(mm_daemon_cfg_t *cfg_obj)
     return rc;
 }
 
-static int mm_daemon_config_vfe_reg(mm_daemon_cfg_t *cfg_obj,
-        uint32_t regaddr, uint32_t value)
-{
-    uint32_t reg_cfg = value;
-    struct msm_vfe_reg_cfg_cmd reg_cfg_cmd[] = {
-        {
-            .u.rw_info = {
-                .reg_offset = regaddr,
-                .len = 4,
-            },
-            .cmd_type = VFE_WRITE,
-        },
-    };
-
-    return mm_daemon_config_vfe_reg_cmd(cfg_obj, 4, (void *)&reg_cfg,
-            (void *)reg_cfg_cmd, ARRAY_SIZE(reg_cfg_cmd));
-}
-
 static void mm_daemon_config_stats_stream_request(mm_daemon_cfg_t *cfg_obj)
 {
     int isp_stat;
