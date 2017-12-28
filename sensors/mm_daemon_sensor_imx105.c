@@ -388,13 +388,16 @@ static cam_capability_t imx105_capabilities = {
     .hor_view_angle = 63.1,
     .ver_view_angle = 63.1,
 
-    .preview_sizes_tbl_cnt = 6,
+    .preview_sizes_tbl_cnt = 9,
     .preview_sizes_tbl = {
-        {1290, 1088},
+        {1920, 1088},
         {1280, 720},
+        {960, 544},
+        {800, 480},
         {720, 480},
         {640, 480},
-        {352, 288},
+        {640, 368},
+        {480, 320},
         {320, 240},
     },
 
@@ -422,11 +425,14 @@ static cam_capability_t imx105_capabilities = {
 
     .histogram_supported = 1,
 
-    .scale_picture_sizes_cnt = 3,
+    .scale_picture_sizes_cnt = 6,
     .scale_picture_sizes = {
-        {640, 480},
+        {512, 288},
+        {480, 288},
+        {432, 288},
         {512, 384},
-        {384, 288},
+        {352, 288},
+        {0, 0},
     },
 };
 
