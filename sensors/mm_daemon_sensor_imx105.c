@@ -442,7 +442,7 @@ static struct mm_sensor_stream_attr imx105_attr_snapshot = {
     .ro_cfg = 0x9CCC66,
     .h = 2464,
     .w = 3280,
-    .blk_l = 70,
+    .blk_l = 12,
     .blk_p = 256,
 };
 
