@@ -1167,7 +1167,7 @@ static cam_capability_t mt9v113_capabilities = {
 
     .fps_ranges_tbl_cnt = 1,
     .fps_ranges_tbl = {
-        {9.0, 30},
+        {9.0, 31},
     },
 
     .supported_antibandings_cnt = 3,
