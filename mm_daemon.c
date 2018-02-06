@@ -1,5 +1,5 @@
 /*
-   Copyright (C) 2014-2017 Brian Stepp 
+   Copyright (C) 2018 Brian Stepp 
       steppnasty@gmail.com
 
    This program is free software; you can redistribute it and/or
@@ -73,9 +73,9 @@ static void mm_daemon_server_find_subdev(mm_daemon_sd_obj_t *sd)
     struct media_device_info dev_info;
 
     struct daemon_subdevs {
-	char *dev_name;
+        char *dev_name;
         uint32_t group_id;
-	uint32_t sd_type;
+        uint32_t sd_type;
     } subdevs[] = {
         {MM_CAMERA_NAME, QCAMERA_VNODE_GROUP_ID, MEDIA_ENT_T_DEVNODE_V4L},
         {MM_CONFIG_NAME, QCAMERA_VNODE_GROUP_ID, MEDIA_ENT_T_DEVNODE_V4L},
@@ -83,6 +83,7 @@ static void mm_daemon_server_find_subdev(mm_daemon_sd_obj_t *sd)
         {MM_CONFIG_NAME, MSM_CAMERA_SUBDEV_SENSOR, MEDIA_ENT_T_V4L2_SUBDEV},
         {MM_CONFIG_NAME, MSM_CAMERA_SUBDEV_BUF_MNGR, MEDIA_ENT_T_V4L2_SUBDEV},
         {MM_CONFIG_NAME, MSM_CAMERA_SUBDEV_CSIC, MEDIA_ENT_T_V4L2_SUBDEV},
+        {MM_CONFIG_NAME, MSM_CAMERA_SUBDEV_LED_FLASH, MEDIA_ENT_T_V4L2_SUBDEV},
     };
 
     for (i = 0; i < ARRAY_SIZE(subdevs); i++) {
@@ -144,12 +145,14 @@ static void mm_daemon_server_find_subdev(mm_daemon_sd_obj_t *sd)
                         }
                         break;
                     case MSM_CAMERA_SUBDEV_VFE:
+                        sd->vfe_sd.found = 1;
                         sd->vfe_sd.type = MM_VFE;
                         snprintf(sd->vfe_sd.devpath, sizeof(subdev_name),
                                 "%s", subdev_name);
                         break;
                     case MSM_CAMERA_SUBDEV_SENSOR:
                         if (sd->num_sensors < MSM_MAX_CAMERA_SENSORS) {
+                            sd->sensor_sd[sd->num_sensors].found = 1;
                             sd->sensor_sd[sd->num_sensors].type = MM_SNSR;
                             snprintf(sd->sensor_sd[sd->num_sensors].devpath,
                                     sizeof(subdev_name), "%s", subdev_name);
@@ -160,12 +163,14 @@ static void mm_daemon_server_find_subdev(mm_daemon_sd_obj_t *sd)
                         }
                         break;
                     case MSM_CAMERA_SUBDEV_BUF_MNGR:
+                        sd->buf.found = 1;
                         sd->buf.type = MM_BUF;
                         snprintf(sd->buf.devpath, sizeof(subdev_name),
                                 "%s", subdev_name);
                         break;
                     case MSM_CAMERA_SUBDEV_CSIPHY:
                         if (sd->num_csi < MSM_MAX_CAMERA_SENSORS) {
+                            sd->csi[sd->num_csi].found = 1;
                             sd->csi[sd->num_csi].type = MM_CSIPHY;
                             snprintf(sd->csi[sd->num_csi].devpath,
                                     sizeof(subdev_name), "%s", subdev_name);
@@ -175,6 +180,7 @@ static void mm_daemon_server_find_subdev(mm_daemon_sd_obj_t *sd)
                         break;
                     case MSM_CAMERA_SUBDEV_CSID:
                         if (sd->num_csi < MSM_MAX_CAMERA_SENSORS) {
+                            sd->csi[sd->num_csi].found = 1;
                             sd->csi[sd->num_csi].type = MM_CSID;
                             snprintf(sd->csi[sd->num_csi].devpath,
                                     sizeof(subdev_name), "%s", subdev_name);
@@ -184,6 +190,7 @@ static void mm_daemon_server_find_subdev(mm_daemon_sd_obj_t *sd)
                         break;
                     case MSM_CAMERA_SUBDEV_CSIC:
                         if (sd->num_csi < MSM_MAX_CAMERA_SENSORS) {
+                            sd->csi[sd->num_csi].found = 1;
                             sd->csi[sd->num_csi].type = MM_CSIC;
                             snprintf(sd->csi[sd->num_csi].devpath,
                                     sizeof(subdev_name), "%s", subdev_name);
@@ -191,6 +198,13 @@ static void mm_daemon_server_find_subdev(mm_daemon_sd_obj_t *sd)
                             sd->num_csi++;
                         }
                         break;
+                    case MSM_CAMERA_SUBDEV_LED_FLASH:
+                        sd->led.found = 1;
+                        sd->led.type = MM_LED;
+                        snprintf(sd->led.devpath, sizeof(subdev_name),
+                                "%s", subdev_name);
+                        mm_daemon_led_load(&sd->led);
+			break;
                     default:
                         break;
                     }
@@ -276,6 +290,10 @@ static void mm_daemon_notify(mm_daemon_sd_obj_t *sd)
                 case CAM_PRIV_PARM:
                     mm_daemon_server_config_cmd(mm_obj, CFG_CMD_PARM,
                             msm_evt->stream_id);
+                    break;
+                case CAM_PRIV_PREPARE_SNAPSHOT:
+                    mm_daemon_server_config_cmd(mm_obj,
+                            CFG_CMD_PREPARE_SNAPSHOT, msm_evt->stream_id);
                     break;
                 case MSM_CAMERA_PRIV_S_FMT:
                 case MSM_CAMERA_PRIV_SHUTDOWN:

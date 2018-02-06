@@ -1,5 +1,5 @@
 /*
-   Copyright (C) 2014-2017 Brian Stepp 
+   Copyright (C) 2018 Brian Stepp 
       steppnasty@gmail.com
 
    This program is free software; you can redistribute it and/or
@@ -112,6 +112,7 @@ enum mm_daemon_thread_type {
     SNSR_DEV,
     CSI_DEV,
     VFE_DEV,
+    LED_DEV,
     BUF_DEV,
     MAX_DEV,
 };   
@@ -122,6 +123,7 @@ typedef struct {
     void *data;
     void *ops;
     uint8_t type;
+    uint8_t found;
 } mm_daemon_sd_info;
 
 typedef struct {
@@ -133,6 +135,7 @@ typedef struct {
     mm_daemon_sd_info csi[MSM_MAX_CAMERA_SENSORS];
     mm_daemon_sd_info msm_sd;
     mm_daemon_sd_info vfe_sd;
+    mm_daemon_sd_info led;
     mm_daemon_sd_info buf;
     struct mm_daemon_obj *mm_obj;
 } mm_daemon_sd_obj_t;
@@ -207,6 +210,7 @@ typedef struct mm_daemon_cfg {
     uint8_t gain_changed;
     uint8_t wb_changed;
     uint8_t parms_changed;
+    uint8_t preparing_snapshot;
     pthread_mutex_t lock;
     pthread_cond_t cond;
 } mm_daemon_cfg_t;
@@ -228,6 +232,7 @@ typedef enum {
     CFG_CMD_NEW_STREAM,
     CFG_CMD_DEL_STREAM,
     CFG_CMD_PARM,
+    CFG_CMD_PREPARE_SNAPSHOT,
     CFG_CMD_VFE_REG,
     CFG_CMD_SHUTDOWN,
 
@@ -237,6 +242,7 @@ typedef enum {
     CFG_CMD_SK_ERR,
 
     CFG_CMD_CSI_ERR,
+    CFG_CMD_LED_ERR,
     CFG_CMD_ERR,
 } mm_daemon_cfg_cmd_t;
 
@@ -252,6 +258,7 @@ typedef struct {
 
 void mm_daemon_sock_load(mm_daemon_sd_info *sd);
 void mm_daemon_csi_load(mm_daemon_sd_info *sd);
+void mm_daemon_led_load(mm_daemon_sd_info *sd);
 void mm_daemon_sensor_load(mm_daemon_sd_info *snsr, mm_daemon_sd_info *camif);
 mm_daemon_thread_info *mm_daemon_config_open(mm_daemon_sd_obj_t *sd,
         uint8_t session_id, int32_t cb_pfd);

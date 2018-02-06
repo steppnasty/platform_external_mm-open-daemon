@@ -28,6 +28,7 @@
 #include "mm_daemon_sensor.h"
 #include "mm_daemon_sock.h"
 #include "mm_daemon_csi.h"
+#include "mm_daemon_led.h"
 #include "mm_daemon_util.h"
 
 static uint32_t isp_events[] = {
@@ -109,6 +110,20 @@ static void mm_daemon_config_stats_cmd(mm_daemon_stats_t *mm_stats,
     len = write(mm_stats->pfds[1], &pipe_cmd, sizeof(pipe_cmd));
     if (len < 1)
         ALOGI("%s: write error", __FUNCTION__);
+}
+
+static void mm_daemon_config_parm_flash(mm_daemon_cfg_t *cfg_obj, int32_t mode)
+{
+    enum msm_camera_led_config_t fl = MSM_CAMERA_LED_OFF;
+
+    if (!cfg_obj->info[LED_DEV] || mode != CAM_FLASH_MODE_OFF ||
+            mode != CAM_FLASH_MODE_TORCH)
+        return;
+
+    if (mode == CAM_FLASH_MODE_TORCH)
+        fl = MSM_CAMERA_LED_TORCH;
+
+    mm_daemon_util_subdev_cmd(cfg_obj->info[LED_DEV], LED_CMD_CONTROL, fl, 0);
 }
 
 static void mm_daemon_config_parm(mm_daemon_cfg_t *cfg_obj)
@@ -214,8 +229,10 @@ static void mm_daemon_config_parm(mm_daemon_cfg_t *cfg_obj)
             case CAM_INTF_PARM_LED_MODE: { /* 10 */
                 int32_t *cvalue = (int32_t *)POINTER_OF(current, c_table);
                 int32_t *pvalue = (int32_t *)POINTER_OF(current, p_table);
-                if (*cvalue != *pvalue)
+                if (*cvalue != *pvalue) {
                     memcpy(cvalue, pvalue, sizeof(int32_t));
+                    mm_daemon_config_parm_flash(cfg_obj, *cvalue);
+                }
                 break;
             }
             case CAM_INTF_PARM_SHARPNESS: { /* 16 */
@@ -583,18 +600,36 @@ static void mm_daemon_config_isp_set_metadata(mm_daemon_cfg_t *cfg_obj,
                     switch (stats_type) {
                         case MSM_ISP_STATS_AEC: {
                             uint32_t gain = mm_stats->done_work.val;
+                            uint32_t flash_needed = 0;
+                            int32_t *led_mode = (int32_t *)POINTER_OF(
+                                    CAM_INTF_PARM_LED_MODE,
+                                    cfg_obj->parm_buf.cfg_buf);
                             if ((gain != cfg_obj->curr_gain || gain == 512) &&
                                     !cfg_obj->gain_changed) {
                                 cfg_obj->curr_gain = gain;
                                 cfg_obj->gain_changed = 1;
                             }
-                                
+
+                            if ((*led_mode == CAM_FLASH_MODE_ON) ||
+                                    (*led_mode == CAM_FLASH_MODE_AUTO &&
+                                    gain == 512))
+                                flash_needed = 1;
+
+                            if (cfg_obj->preparing_snapshot) {
+                                cfg_obj->curr_gain = DEFAULT_EXP_GAIN;
+                                meta->is_prep_snapshot_done_valid = 1;
+                                meta->prep_snapshot_done_state =
+                                        DO_NOT_NEED_FUTURE_FRAME;
+                            }
+
                             if (mm_stats->done_work.len)
                                 memcpy(&meta->chromatix_lite_ae_stats_data.
                                         private_stats_data[0],
                                         mm_stats->done_work.buf,
                                         mm_stats->done_work.len);
                             meta->is_chromatix_lite_ae_stats_valid = 1;
+                            meta->is_ae_params_valid = 1;
+                            meta->ae_params.flash_needed = flash_needed;
                             break;
                         }
                         case MSM_ISP_STATS_AWB: {
@@ -2923,8 +2958,18 @@ static void mm_daemon_config_stop_preview(mm_daemon_cfg_t *cfg_obj)
 
     mm_daemon_config_isp_stream_cfg(cfg_obj, stream_type, STOP_STREAM);
     mm_daemon_config_isp_stream_release(cfg_obj, stream_type);
+    if (cfg_obj->preparing_snapshot)
+        mm_daemon_util_subdev_cmd(cfg_obj->info[LED_DEV],
+            LED_CMD_CONTROL, MSM_CAMERA_LED_OFF, 0);
     mm_daemon_config_vfe_stop(cfg_obj);
     cfg_obj->vfe_started = 0;
+}
+
+static void mm_daemon_config_prepare_snapshot(mm_daemon_cfg_t *cfg_obj)
+{
+    cfg_obj->preparing_snapshot = 1;
+    mm_daemon_util_subdev_cmd(cfg_obj->info[LED_DEV],
+            LED_CMD_CONTROL, MSM_CAMERA_LED_LOW, 0);
 }
 
 static int mm_daemon_config_start_snapshot(mm_daemon_cfg_t *cfg_obj)
@@ -2947,6 +2992,11 @@ static int mm_daemon_config_start_snapshot(mm_daemon_cfg_t *cfg_obj)
     mm_daemon_config_vfe_rgb_gamma_chbank(cfg_obj, 4);
     mm_daemon_config_vfe_rgb_gamma_chbank(cfg_obj, 6);
     mm_daemon_config_vfe_rgb_gamma_chbank(cfg_obj, 12);
+    if (cfg_obj->preparing_snapshot) {
+        mm_daemon_util_subdev_cmd(cfg_obj->info[LED_DEV],
+                LED_CMD_CONTROL, MSM_CAMERA_LED_HIGH, 0);
+        cfg_obj->preparing_snapshot = 0;
+    }
     mm_daemon_config_vfe_camif(cfg_obj, stream_type);
     mm_daemon_config_vfe_demux(cfg_obj, stream_type);
     mm_daemon_config_vfe_out_clamp(cfg_obj);
@@ -2960,6 +3010,11 @@ static int mm_daemon_config_start_snapshot(mm_daemon_cfg_t *cfg_obj)
 
 static void mm_daemon_config_stop_snapshot(mm_daemon_cfg_t *cfg_obj)
 {
+    if (cfg_obj->preparing_snapshot) {
+        mm_daemon_util_subdev_cmd(cfg_obj->info[LED_DEV],
+                LED_CMD_CONTROL, MSM_CAMERA_LED_OFF, 0);
+        cfg_obj->preparing_snapshot = 0;
+    }
     mm_daemon_config_isp_stream_cfg(cfg_obj, CAM_STREAM_TYPE_SNAPSHOT,
             STOP_STREAM);
     mm_daemon_config_isp_stream_release(cfg_obj, CAM_STREAM_TYPE_POSTVIEW);
@@ -3397,6 +3452,10 @@ static int mm_daemon_config_pipe_cmd(mm_daemon_cfg_t *cfg_obj)
             if (cfg_obj->parm_buf.mapped)
                 mm_daemon_config_parm(cfg_obj);
             break;
+        case CFG_CMD_PREPARE_SNAPSHOT:
+            if (cfg_obj->info[LED_DEV])
+                mm_daemon_config_prepare_snapshot(cfg_obj);
+            break;
         case CFG_CMD_MAP_UNMAP_DONE:
             mm_daemon_util_pipe_cmd(cfg_obj->cfg->cb_pfd,
                     SERVER_CMD_MAP_UNMAP_DONE, pipe_cmd.val);
@@ -3613,6 +3672,12 @@ static void *mm_daemon_config_thread(void *data)
                 cam_idx, cfg_obj->cfg->pfds[1]);
         if (!cfg_obj->info[CSI_DEV])
             goto snsr_close;
+    }
+
+    /* LED */
+    if (sd->led.found) {
+        cfg_obj->info[LED_DEV] = mm_daemon_util_thread_open(
+                &sd->led, cam_idx, cfg_obj->cfg->pfds[1]);
     }
 
     for (i = 0; i < ARRAY_SIZE(isp_events); i++)
