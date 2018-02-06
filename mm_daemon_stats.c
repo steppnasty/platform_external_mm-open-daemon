@@ -1,5 +1,5 @@
 /*
-   Copyright (C) 2014-2017 Brian Stepp 
+   Copyright (C) 2018 Brian Stepp 
       steppnasty@gmail.com
 
    This program is free software; you can redistribute it and/or
@@ -67,23 +67,31 @@ static int mm_daemon_stats_proc_aec(mm_daemon_stats_t *mm_stats,
 
         adj = (target_ae - val);
         if (adj > 0) {
-            if (adj < 10)
+            if (adj < 5)
                 adj = 0;
-            else if (adj < 20)
+            else if (adj < 10)
                 adj = 1;
-            else if (adj < 30)
+            else if (adj < 15)
                 adj = 5;
-            else
+            else if (adj < 20)
                 adj = 10;
-        } else {
-            if (adj > -10)
-                adj = 0;
-            else if (adj > -20)
-                adj = -1;
-            else if (adj > -30)
-                adj = -5;
+            else if (adj < 30)
+                adj = 50;
             else
+                adj = 100;
+        } else {
+            if (adj > -5)
+                adj = 0;
+            else if (adj > -10)
+                adj = 1;
+            else if (adj > -15)
+                adj = -5;
+            else if (adj > -20)
                 adj = -10;
+            else if (adj > -30)
+                adj = -50;
+            else
+                adj = -100;
         }
         gain = curr_gain + adj;
         if (gain > 512)
