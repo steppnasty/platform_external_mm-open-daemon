@@ -1,5 +1,5 @@
 /*
-   Copyright (C) 2017 Brian Stepp 
+   Copyright (C) 2018 Brian Stepp 
       steppnasty@gmail.com
 
    This program is free software; you can redistribute it and/or
@@ -95,12 +95,40 @@ int mm_daemon_util_set_thread_state(mm_daemon_thread_info *info,
  *
  * PARAMETERS :
  *   @pfd: file descriptor for receiving poll thread
+ *   @cmd: command
+ *   @val: extra data value
  *==========================================================================*/
 void mm_daemon_util_pipe_cmd(int32_t pfd, uint8_t cmd, int32_t val)
 {
     mm_daemon_pipe_evt_t pipe_cmd;
 
+    memset(&pipe_cmd, 0, sizeof(pipe_cmd));
     pipe_cmd.cmd = cmd;
     pipe_cmd.val = val;
     write(pfd, &pipe_cmd, sizeof(pipe_cmd));
+}
+
+/*==========================================================================
+ * FUNCTION   : mm_daemon_util_subdev_cmd
+ *
+ * DESCRIPTION: Sends pipe command to a subdevice thread
+ *
+ * PARAMETERS :
+ *   @info: pointer to thread info object
+ *   @cmd:  subdev command
+ *   @val:  extra data value
+ *   @wait: set to 1 to wait for polling thread to unlock before continuing
+ *==========================================================================*/
+void mm_daemon_util_subdev_cmd(mm_daemon_thread_info *info, uint8_t cmd,
+        int32_t val, int wait)
+{
+    if (!info)
+        return;
+
+    mm_daemon_util_pipe_cmd(info->pfds[1], cmd, val);
+    if (wait) {
+        pthread_mutex_lock(&info->lock);
+        pthread_cond_wait(&info->cond, &info->lock);
+        pthread_mutex_unlock(&info->lock);
+    }
 }

@@ -1,5 +1,5 @@
 /*
-   Copyright (C) 2016-2017 Brian Stepp 
+   Copyright (C) 2018 Brian Stepp 
       steppnasty@gmail.com
 
    This program is free software; you can redistribute it and/or
@@ -97,37 +97,6 @@ static uint32_t mm_daemon_config_v4l2_fmt(cam_format_t fmt)
     return val;
 }
 
-static void mm_daemon_config_server_cmd(int32_t pfd, uint8_t cmd, int32_t val)
-{
-    int len;
-    mm_daemon_pipe_evt_t pipe_cmd;
-
-    memset(&pipe_cmd, 0, sizeof(pipe_cmd));
-    pipe_cmd.cmd = cmd;
-    pipe_cmd.val = val;
-    len = write(pfd, &pipe_cmd, sizeof(pipe_cmd));
-    if (len < 1)
-        ALOGI("%s: write error", __FUNCTION__);
-}
-
-static void mm_daemon_config_sensor_cmd(mm_daemon_thread_info *info,
-        uint8_t cmd, int32_t val, int wait)
-{
-    int len;
-    mm_daemon_pipe_evt_t pipe_cmd;
-
-    pthread_mutex_lock(&info->lock);
-    memset(&pipe_cmd, 0, sizeof(pipe_cmd));
-    pipe_cmd.cmd = cmd;
-    pipe_cmd.val = val;
-    len = write(info->pfds[1], &pipe_cmd, sizeof(pipe_cmd));
-    if (len < 1)
-        ALOGI("%s: write error", __FUNCTION__);
-    if (wait)
-        pthread_cond_wait(&info->cond, &info->lock);
-    pthread_mutex_unlock(&info->lock);
-}
-
 static void mm_daemon_config_stats_cmd(mm_daemon_stats_t *mm_stats,
         uint8_t cmd, int32_t val)
 {
@@ -140,20 +109,6 @@ static void mm_daemon_config_stats_cmd(mm_daemon_stats_t *mm_stats,
     len = write(mm_stats->pfds[1], &pipe_cmd, sizeof(pipe_cmd));
     if (len < 1)
         ALOGI("%s: write error", __FUNCTION__);
-}
-
-static void mm_daemon_config_csi_cmd(mm_daemon_thread_info *info,
-	uint8_t cmd, int32_t val)
-{
-    int len;
-    mm_daemon_pipe_evt_t pipe_cmd;
-
-    memset(&pipe_cmd, 0, sizeof(pipe_cmd));
-    pipe_cmd.cmd = cmd;
-    pipe_cmd.val = val;
-    len = write(info->pfds[1], &pipe_cmd, sizeof(pipe_cmd));
-    if (len < 1)
-        ALOGE("%s: write error", __FUNCTION__);
 }
 
 static void mm_daemon_config_parm(mm_daemon_cfg_t *cfg_obj)
@@ -182,7 +137,7 @@ static void mm_daemon_config_parm(mm_daemon_cfg_t *cfg_obj)
                 if (*cvalue != *pvalue) {
                     memcpy(cvalue, pvalue, sizeof(int32_t));
                     if (cfg_obj->sdata->uses_sensor_ctrls)
-                        mm_daemon_config_sensor_cmd(cfg_obj->info[SNSR_DEV],
+                        mm_daemon_util_subdev_cmd(cfg_obj->info[SNSR_DEV],
                                 SENSOR_CMD_AB, *cvalue, 0);
                 }
                 break;
@@ -224,7 +179,7 @@ static void mm_daemon_config_parm(mm_daemon_cfg_t *cfg_obj)
                 if (*cvalue != *pvalue) {
                     memcpy(cvalue, pvalue, sizeof(int32_t));
                     if (cfg_obj->sdata->uses_sensor_ctrls)
-                        mm_daemon_config_sensor_cmd(cfg_obj->info[SNSR_DEV],
+                        mm_daemon_util_subdev_cmd(cfg_obj->info[SNSR_DEV],
                                 SENSOR_CMD_WB, *cvalue, 0);
                     else if (cfg_obj->vfe_started)
                         cfg_obj->wb_changed = 1;
@@ -237,7 +192,7 @@ static void mm_daemon_config_parm(mm_daemon_cfg_t *cfg_obj)
                 if (*cvalue != *pvalue) {
                     memcpy(cvalue, pvalue, sizeof(int32_t));
                     if (cfg_obj->sdata->uses_sensor_ctrls)
-                        mm_daemon_config_sensor_cmd(cfg_obj->info[SNSR_DEV],
+                        mm_daemon_util_subdev_cmd(cfg_obj->info[SNSR_DEV],
                                 SENSOR_CMD_EFFECT, *cvalue, 0);
                 }
                 break;
@@ -269,7 +224,7 @@ static void mm_daemon_config_parm(mm_daemon_cfg_t *cfg_obj)
                 if (*cvalue != *pvalue) {
                     memcpy(cvalue, pvalue, sizeof(int32_t));
                     if (cfg_obj->sdata->uses_sensor_ctrls)
-                        mm_daemon_config_sensor_cmd(cfg_obj->info[SNSR_DEV],
+                        mm_daemon_util_subdev_cmd(cfg_obj->info[SNSR_DEV],
                                 SENSOR_CMD_SHARPNESS, *cvalue, 0);
                 }
                 break;
@@ -280,7 +235,7 @@ static void mm_daemon_config_parm(mm_daemon_cfg_t *cfg_obj)
                 if (*cvalue != *pvalue) {
                     memcpy(cvalue, pvalue, sizeof(int32_t));
                     if (cfg_obj->sdata->uses_sensor_ctrls)
-                        mm_daemon_config_sensor_cmd(cfg_obj->info[SNSR_DEV],
+                        mm_daemon_util_subdev_cmd(cfg_obj->info[SNSR_DEV],
                                 SENSOR_CMD_CONTRAST, *cvalue, 0);
                 }
                 break;
@@ -291,7 +246,7 @@ static void mm_daemon_config_parm(mm_daemon_cfg_t *cfg_obj)
                 if (*cvalue != *pvalue) {
                     memcpy(cvalue, pvalue, sizeof(int32_t));
                     if (cfg_obj->sdata->uses_sensor_ctrls)
-                        mm_daemon_config_sensor_cmd(cfg_obj->info[SNSR_DEV],
+                        mm_daemon_util_subdev_cmd(cfg_obj->info[SNSR_DEV],
                                 SENSOR_CMD_SATURATION, *cvalue, 0);
                 }
                 break;
@@ -302,7 +257,7 @@ static void mm_daemon_config_parm(mm_daemon_cfg_t *cfg_obj)
                 if (*cvalue != *pvalue) {
                     memcpy(cvalue, pvalue, sizeof(int32_t));
                     if (cfg_obj->sdata->uses_sensor_ctrls)
-                        mm_daemon_config_sensor_cmd(cfg_obj->info[SNSR_DEV],
+                        mm_daemon_util_subdev_cmd(cfg_obj->info[SNSR_DEV],
                                 SENSOR_CMD_BRIGHTNESS, *cvalue, 0);
                 }
                 break;
@@ -3063,7 +3018,7 @@ static int mm_daemon_config_sk_pkt_map(mm_daemon_cfg_t *cfg_obj,
             cfg_obj->cap_buf.mapped = 1;
             memcpy(cfg_obj->cap_buf.vaddr, cfg_obj->sdata->cap,
                     sizeof(cam_capability_t));
-            mm_daemon_config_server_cmd(cfg_obj->cfg->cb_pfd,
+            mm_daemon_util_pipe_cmd(cfg_obj->cfg->cb_pfd,
                     SERVER_CMD_CAP_BUF_MAP, 1);
             rc = 0;
         }
@@ -3170,7 +3125,7 @@ static int mm_daemon_config_sk_pkt_unmap(mm_daemon_cfg_t *cfg_obj,
             close(cfg_obj->cap_buf.fd);
             cfg_obj->cap_buf.fd = 0;
             cfg_obj->cap_buf.mapped = 0;
-            mm_daemon_config_server_cmd(cfg_obj->cfg->cb_pfd,
+            mm_daemon_util_pipe_cmd(cfg_obj->cfg->cb_pfd,
                     SERVER_CMD_CAP_BUF_MAP, 0);
         }
         break;
@@ -3240,7 +3195,7 @@ static void mm_daemon_config_isp_evt_sof(mm_daemon_cfg_t *cfg_obj)
         }
         if (cfg_obj->gain_changed) {
             if (cfg_obj->info[SNSR_DEV]->state != STATE_STOPPED)
-                mm_daemon_config_sensor_cmd(cfg_obj->info[SNSR_DEV], SENSOR_CMD_EXP_GAIN,
+                mm_daemon_util_subdev_cmd(cfg_obj->info[SNSR_DEV], SENSOR_CMD_EXP_GAIN,
                         cfg_obj->curr_gain, 0);
             cfg_obj->gain_changed = 0;
         }
@@ -3345,9 +3300,9 @@ static int mm_daemon_config_pipe_cmd(mm_daemon_cfg_t *cfg_obj)
                 switch (stream_type) {
                     case CAM_STREAM_TYPE_PREVIEW:
                         if (cfg_obj->info[CSI_DEV])
-                            mm_daemon_config_csi_cmd(cfg_obj->info[CSI_DEV],
-                                    CSI_CMD_CFG, 0);
-                        mm_daemon_config_sensor_cmd(cfg_obj->info[SNSR_DEV],
+                            mm_daemon_util_subdev_cmd(cfg_obj->info[CSI_DEV],
+                                    CSI_CMD_CFG, 0, 0);
+                        mm_daemon_util_subdev_cmd(cfg_obj->info[SNSR_DEV],
                                 SENSOR_CMD_PREVIEW, 0, 1);
                         rc = mm_daemon_config_start_preview(cfg_obj);
                         break;
@@ -3366,7 +3321,7 @@ static int mm_daemon_config_pipe_cmd(mm_daemon_cfg_t *cfg_obj)
                             mm_daemon_config_isp_buf_enqueue(cfg_obj,
                                     stream_type);
                         if (stream_type == CAM_STREAM_TYPE_SNAPSHOT) {
-                            mm_daemon_config_sensor_cmd(cfg_obj->info[SNSR_DEV],
+                            mm_daemon_util_subdev_cmd(cfg_obj->info[SNSR_DEV],
                                     SENSOR_CMD_SNAPSHOT, 0, 1);
                             rc = mm_daemon_config_start_snapshot(cfg_obj);
                         }
@@ -3420,7 +3375,7 @@ static int mm_daemon_config_pipe_cmd(mm_daemon_cfg_t *cfg_obj)
             }
             if (idx == MAX_NUM_STREAM)
                 return -ENOMEM;
-            mm_daemon_config_sensor_cmd(cfg_obj->info[SNSR_DEV],
+            mm_daemon_util_subdev_cmd(cfg_obj->info[SNSR_DEV],
                     SENSOR_CMD_POWER_UP, 0, 0);
             cfg_obj->stream_buf[idx] = (mm_daemon_buf_info *)malloc(
                     sizeof(mm_daemon_buf_info));
@@ -3443,19 +3398,19 @@ static int mm_daemon_config_pipe_cmd(mm_daemon_cfg_t *cfg_obj)
                 mm_daemon_config_parm(cfg_obj);
             break;
         case CFG_CMD_MAP_UNMAP_DONE:
-            mm_daemon_config_server_cmd(cfg_obj->cfg->cb_pfd,
+            mm_daemon_util_pipe_cmd(cfg_obj->cfg->cb_pfd,
                     SERVER_CMD_MAP_UNMAP_DONE, pipe_cmd.val);
             break;
         case CFG_CMD_SK_PKT_MAP:
             rc = mm_daemon_config_sk_pkt_map(cfg_obj,
                     (struct mm_daemon_sk_pkt *)pipe_cmd.val);
-            mm_daemon_config_server_cmd(cfg_obj->cfg->cb_pfd,
+            mm_daemon_util_pipe_cmd(cfg_obj->cfg->cb_pfd,
                     SERVER_CMD_MAP_UNMAP_DONE, pipe_cmd.val);
             break;
         case CFG_CMD_SK_PKT_UNMAP:
             rc = mm_daemon_config_sk_pkt_unmap(cfg_obj,
                     (struct mm_daemon_sk_pkt *)pipe_cmd.val);
-            mm_daemon_config_server_cmd(cfg_obj->cfg->cb_pfd,
+            mm_daemon_util_pipe_cmd(cfg_obj->cfg->cb_pfd,
                     SERVER_CMD_MAP_UNMAP_DONE, pipe_cmd.val);
             break;
         case CFG_CMD_SK_ERR:
@@ -3674,8 +3629,8 @@ static void *mm_daemon_config_thread(void *data)
         mm_daemon_config_stats_init(cfg_obj);
 
     if (cfg_obj->info[CSI_DEV] && cfg_obj->sdata->csi_params)
-        mm_daemon_config_csi_cmd(cfg_obj->info[CSI_DEV], CSI_CMD_SET_PARAMS,
-                (uint32_t)cfg_obj->sdata->csi_params);
+        mm_daemon_util_subdev_cmd(cfg_obj->info[CSI_DEV], CSI_CMD_SET_PARAMS,
+                (uint32_t)cfg_obj->sdata->csi_params, 0);
 
     info->state = STATE_POLL;
     pthread_cond_signal(&cfg_obj->cfg->cond);
@@ -3694,7 +3649,7 @@ static void *mm_daemon_config_thread(void *data)
             else
                 usleep(1000);
             if (ret < 0) {
-                mm_daemon_config_sensor_cmd(cfg_obj->info[SNSR_DEV],
+                mm_daemon_util_subdev_cmd(cfg_obj->info[SNSR_DEV],
                         SENSOR_CMD_SHUTDOWN, 0, 0);
                 info->state = STATE_STOPPED;
                 break;
