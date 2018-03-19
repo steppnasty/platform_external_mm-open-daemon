@@ -1,5 +1,5 @@
 /*
-   Copyright (C) 2018 Brian Stepp 
+   Copyright (C) 2014-2018 Brian Stepp
       steppnasty@gmail.com
 
    This program is free software; you can redistribute it and/or
@@ -25,8 +25,11 @@
 #include "mm_daemon.h"
 
 struct mm_daemon_thread_ops {
-    void *(*thread)(void *data);
+    void *(*start)(void *data);
+    int (*init)(mm_daemon_thread_info *info);
     void (*stop)(mm_daemon_thread_info *info);
+    void (*shutdown)(mm_daemon_thread_info *info);
+    int (*cmd)(mm_daemon_thread_info *info);
 };
 
 mm_daemon_thread_info *mm_daemon_util_thread_open(mm_daemon_sd_info *sd,

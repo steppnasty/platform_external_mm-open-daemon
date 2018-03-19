@@ -1,5 +1,5 @@
 /*
-   Copyright (C) 2014-2017 Brian Stepp 
+   Copyright (C) 2014-2018 Brian Stepp
       steppnasty@gmail.com
 
    This program is free software; you can redistribute it and/or
@@ -52,7 +52,7 @@ struct mm_sensor_ops {
     int (*contrast)(struct mm_sensor_cfg *cfg, int value);
     int (*effect)(struct mm_sensor_cfg *cfg, int mode);
     int (*sharpness)(struct mm_sensor_cfg *cfg, int value);
-    void (*exp_gain)(struct mm_sensor_cfg *cfg, uint16_t gain);
+    int (*exp_gain)(struct mm_sensor_cfg *cfg, uint16_t gain);
 };
 
 typedef struct mm_sensor_cfg {

@@ -1,5 +1,5 @@
 /*
-   Copyright (C) 2018 Brian Stepp 
+   Copyright (C) 2014-2018 Brian Stepp
       steppnasty@gmail.com
 
    This program is free software; you can redistribute it and/or
@@ -84,6 +84,7 @@ static void mm_daemon_server_find_subdev(mm_daemon_sd_obj_t *sd)
         {MM_CONFIG_NAME, MSM_CAMERA_SUBDEV_BUF_MNGR, MEDIA_ENT_T_V4L2_SUBDEV},
         {MM_CONFIG_NAME, MSM_CAMERA_SUBDEV_CSIC, MEDIA_ENT_T_V4L2_SUBDEV},
         {MM_CONFIG_NAME, MSM_CAMERA_SUBDEV_LED_FLASH, MEDIA_ENT_T_V4L2_SUBDEV},
+        {MM_CONFIG_NAME, MSM_CAMERA_SUBDEV_ACTUATOR, MEDIA_ENT_T_V4L2_SUBDEV},
     };
 
     for (i = 0; i < ARRAY_SIZE(subdevs); i++) {
@@ -156,9 +157,10 @@ static void mm_daemon_server_find_subdev(mm_daemon_sd_obj_t *sd)
                             sd->sensor_sd[sd->num_sensors].type = MM_SNSR;
                             snprintf(sd->sensor_sd[sd->num_sensors].devpath,
                                     sizeof(subdev_name), "%s", subdev_name);
-                            mm_daemon_sensor_load(
+                            mm_daemon_snsr_load(
                                  &sd->sensor_sd[sd->num_sensors],
-                                 &sd->csi[sd->num_sensors]);
+                                 &sd->csi[sd->num_sensors],
+                                 &sd->act[sd->num_sensors]);
                             sd->num_sensors++;
                         }
                         break;
@@ -204,7 +206,27 @@ static void mm_daemon_server_find_subdev(mm_daemon_sd_obj_t *sd)
                         snprintf(sd->led.devpath, sizeof(subdev_name),
                                 "%s", subdev_name);
                         mm_daemon_led_load(&sd->led);
-			break;
+                        break;
+                    case MSM_CAMERA_SUBDEV_ACTUATOR: {
+                        uint32_t subdev_id;
+                        int act_fd = open(subdev_name, O_RDWR | O_NONBLOCK);
+
+                        if (act_fd < 0)
+                            break;
+
+                        if (ioctl(act_fd, VIDIOC_MSM_SENSOR_GET_SUBDEV_ID,
+                                &subdev_id) < 0) {
+                            close(act_fd);
+                            break;
+                        }
+                        close(act_fd);
+                        sd->act[subdev_id].found = 1;
+                        sd->act[subdev_id].type = MM_ACT;
+                        snprintf(sd->act[subdev_id].devpath, sizeof(subdev_name),
+                                "%s", subdev_name);
+                        mm_daemon_act_load(&sd->act[subdev_id]);
+                        break;
+                    }
                     default:
                         break;
                     }
@@ -240,88 +262,98 @@ static void mm_daemon_notify(mm_daemon_sd_obj_t *sd)
         else {
             mm_obj->cfg_shutdown = 1;
             mm_daemon_pack_event(mm_obj, &new_ev, CAM_EVENT_TYPE_DAEMON_DIED,
-                    MSM_CAMERA_PRIV_SHUTDOWN, msm_evt->stream_id, MSM_CAMERA_STATUS_SUCCESS);
+                    MSM_CAMERA_PRIV_SHUTDOWN, msm_evt->stream_id,
+                    MSM_CAMERA_STATUS_SUCCESS);
             ioctl(mm_obj->server_fd, MSM_CAM_V4L2_IOCTL_NOTIFY, &new_ev);
             return;
         }
     }
     switch (ev.id) {
-        case MSM_CAMERA_NEW_SESSION:
-            if (mm_obj->cfg)
-                break;
-            mm_obj->session_id = msm_evt->session_id;
-            mm_obj->stream_id = msm_evt->stream_id;
-            mm_obj->cfg = mm_daemon_config_open(sd, msm_evt->session_id,
-                    mm_obj->svr_pfds[1]);
-            status = MSM_CAMERA_CMD_SUCESS;
+    case MSM_CAMERA_NEW_SESSION:
+        if (mm_obj->cfg)
             break;
-        case MSM_CAMERA_DEL_SESSION:
-            mm_daemon_server_config_cmd(mm_obj, CFG_CMD_SHUTDOWN,
+        mm_obj->session_id = msm_evt->session_id;
+        mm_obj->stream_id = msm_evt->stream_id;
+        mm_obj->cfg = mm_daemon_config_open(sd, msm_evt->session_id,
+                mm_obj->svr_pfds[1]);
+        status = MSM_CAMERA_CMD_SUCESS;
+        break;
+    case MSM_CAMERA_DEL_SESSION:
+        mm_daemon_server_config_cmd(mm_obj, CFG_CMD_SHUTDOWN,
+                msm_evt->stream_id);
+        mm_daemon_config_close(mm_obj->cfg);
+        mm_obj->cfg = NULL;
+        status = MSM_CAMERA_CMD_SUCESS;
+        break;
+    case MSM_CAMERA_SET_PARM:
+        switch (msm_evt->command) {
+        case MSM_CAMERA_PRIV_STREAM_ON:
+            mm_daemon_server_config_cmd(mm_obj, CFG_CMD_STREAM_START,
                     msm_evt->stream_id);
-            mm_daemon_config_close(mm_obj->cfg);
-            mm_obj->cfg = NULL;
-            status = MSM_CAMERA_CMD_SUCESS;
             break;
-        case MSM_CAMERA_SET_PARM:
-            switch (msm_evt->command) {
-                case MSM_CAMERA_PRIV_STREAM_ON:
-                    mm_daemon_server_config_cmd(mm_obj, CFG_CMD_STREAM_START,
-                            msm_evt->stream_id);
-                    break;
-                case MSM_CAMERA_PRIV_STREAM_OFF:
-                    mm_daemon_server_config_cmd(mm_obj, CFG_CMD_STREAM_STOP,
-                            msm_evt->stream_id);
-                    break;
-                case MSM_CAMERA_PRIV_NEW_STREAM:
-                    mm_obj->stream_id = msm_evt->stream_id;
-                    if (msm_evt->stream_id > 0) {
-                        pthread_mutex_lock(&mm_obj->cfg->lock);
-                        mm_daemon_server_config_cmd(mm_obj, CFG_CMD_NEW_STREAM,
-                                msm_evt->stream_id);
-                        pthread_cond_wait(&mm_obj->cfg->cond, &mm_obj->cfg->lock);
-                        pthread_mutex_unlock(&mm_obj->cfg->lock);
-                    }
-                    break;
-                case MSM_CAMERA_PRIV_DEL_STREAM:
-                    if (msm_evt->stream_id > 0)
-                        mm_daemon_server_config_cmd(mm_obj, CFG_CMD_DEL_STREAM,
-                                msm_evt->stream_id);
-                    break;
-                case CAM_PRIV_PARM:
-                    mm_daemon_server_config_cmd(mm_obj, CFG_CMD_PARM,
-                            msm_evt->stream_id);
-                    break;
-                case CAM_PRIV_PREPARE_SNAPSHOT:
-                    mm_daemon_server_config_cmd(mm_obj,
-                            CFG_CMD_PREPARE_SNAPSHOT, msm_evt->stream_id);
-                    break;
-                case MSM_CAMERA_PRIV_S_FMT:
-                case MSM_CAMERA_PRIV_SHUTDOWN:
-                case MSM_CAMERA_PRIV_STREAM_INFO_SYNC:
-                case CAM_PRIV_STREAM_INFO_SYNC:
-                case CAM_PRIV_STREAM_PARM:
-                    break;
-                default:
-                    goto cmd_ack;
-                    break;
-            }
-            status = MSM_CAMERA_CMD_SUCESS;
+        case MSM_CAMERA_PRIV_STREAM_OFF:
+            mm_daemon_server_config_cmd(mm_obj, CFG_CMD_STREAM_STOP,
+                    msm_evt->stream_id);
             break;
-        case MSM_CAMERA_GET_PARM:
-            switch (msm_evt->command) {
-                case MSM_CAMERA_PRIV_QUERY_CAP:
-                    if (mm_obj->cap_buf_mapped) {
-                        status = MSM_CAMERA_CMD_SUCESS;
-                    } else
-                        ALOGE("%s: Error: Capability buffer not mapped",
-                                __FUNCTION__);
-                    break;
-                default:
-                    break;
+        case MSM_CAMERA_PRIV_NEW_STREAM:
+            mm_obj->stream_id = msm_evt->stream_id;
+            if (msm_evt->stream_id > 0) {
+                pthread_mutex_lock(&mm_obj->cfg->lock);
+                mm_daemon_server_config_cmd(mm_obj, CFG_CMD_NEW_STREAM,
+                        msm_evt->stream_id);
+                pthread_cond_wait(&mm_obj->cfg->cond, &mm_obj->cfg->lock);
+                pthread_mutex_unlock(&mm_obj->cfg->lock);
             }
+            break;
+        case MSM_CAMERA_PRIV_DEL_STREAM:
+            if (!msm_evt->stream_id)
+                break;
+            mm_daemon_server_config_cmd(mm_obj, CFG_CMD_DEL_STREAM,
+                    msm_evt->stream_id);
+            break;
+        case CAM_PRIV_PARM:
+            mm_daemon_server_config_cmd(mm_obj, CFG_CMD_PARM,
+                    msm_evt->stream_id);
+            break;
+        case CAM_PRIV_DO_AUTO_FOCUS:
+            mm_daemon_server_config_cmd(mm_obj, CFG_CMD_DO_AUTO_FOCUS,
+                    msm_evt->stream_id);
+            break;
+        case CAM_PRIV_CANCEL_AUTO_FOCUS:
+            mm_daemon_server_config_cmd(mm_obj, CFG_CMD_CANCEL_AUTO_FOCUS,
+                    msm_evt->stream_id);
+            break;
+        case CAM_PRIV_PREPARE_SNAPSHOT:
+            mm_daemon_server_config_cmd(mm_obj, CFG_CMD_PREPARE_SNAPSHOT,
+                    msm_evt->stream_id);
+            break;
+        case MSM_CAMERA_PRIV_S_FMT:
+        case MSM_CAMERA_PRIV_SHUTDOWN:
+        case MSM_CAMERA_PRIV_STREAM_INFO_SYNC:
+        case CAM_PRIV_STREAM_INFO_SYNC:
+        case CAM_PRIV_STREAM_PARM:
+            break;
+        default:
+            goto cmd_ack;
+            break;
+        }
+        status = MSM_CAMERA_CMD_SUCESS;
+        break;
+    case MSM_CAMERA_GET_PARM:
+        switch (msm_evt->command) {
+        case MSM_CAMERA_PRIV_QUERY_CAP:
+            if (mm_obj->cap_buf_mapped)
+                status = MSM_CAMERA_CMD_SUCESS;
+            else
+                ALOGE("%s: Error: Capability buffer not mapped",
+                        __FUNCTION__);
             break;
         default:
             break;
+        }
+        break;
+    default:
+        break;
     }
 cmd_ack:
     mm_daemon_pack_event(mm_obj, &new_ev, 0, ev.id, msm_evt->stream_id, status);

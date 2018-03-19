@@ -1,5 +1,5 @@
 /*
-   Copyright (C) 2016-2017 Brian Stepp 
+   Copyright (C) 2014-2018 Brian Stepp
       steppnasty@gmail.com
 
    This program is free software; you can redistribute it and/or
@@ -90,7 +90,7 @@ static int mm_daemon_proc_packet(mm_daemon_thread_info *info,
 
     if (mm_daemon_util_set_thread_state(info, STATE_LOCKED) < 0)
         return -1;
-   
+
     sk_pkt = (struct mm_daemon_sk_pkt *)calloc(1, sizeof(
             struct mm_daemon_sk_pkt));
 
@@ -107,7 +107,7 @@ static int mm_daemon_proc_packet(mm_daemon_thread_info *info,
     return 0;
 }
 
-static void *mm_daemon_sock_thread(void *data)
+static void *mm_daemon_sock_thread_start(void *data)
 {
     mm_daemon_thread_info *info = (mm_daemon_thread_info *)data;
     mm_daemon_socket_t *mm_sock = NULL;
@@ -126,7 +126,7 @@ static void *mm_daemon_sock_thread(void *data)
         mm_daemon_util_pipe_cmd(info->cb_pfd, CFG_CMD_ERR, info->type);
         return NULL;
     }
-    
+
     do {
         memset(&msgh, 0, sizeof(msgh));
         memset(&packet, 0, sizeof(cam_sock_packet_t));
@@ -209,7 +209,7 @@ connect_fail:
 
 static struct mm_daemon_thread_ops mm_daemon_sock_ops = {
     .stop = mm_daemon_sock_stop,
-    .thread = mm_daemon_sock_thread,
+    .start = mm_daemon_sock_thread_start,
 };
 
 void mm_daemon_sock_load(mm_daemon_sd_info *sd)

@@ -1,5 +1,5 @@
 /*
-   Copyright (C) 2016-2017 Brian Stepp 
+   Copyright (C) 2014-2018 Brian Stepp
       steppnasty@gmail.com
 
    This program is free software; you can redistribute it and/or
@@ -26,8 +26,17 @@
 #include <cam_intf.h>
 
 #define BIT(nr) (1UL << (nr))
+#define SB(type) BIT(CAM_STREAM_TYPE_##type)
 #define ARRAY_SIZE(a)     (sizeof(a) / sizeof(*a))
 #define ROUND(a)((a >= 0) ? (long)(a + 0.5) : (long)(a - 0.5))
+
+#ifndef TRUE
+#define TRUE 1
+#endif
+
+#ifndef FALSE
+#define FALSE 0
+#endif
 
 enum mm_sensor_stream_type {
     PREVIEW,
@@ -48,16 +57,19 @@ struct mm_sensor_stream_attr {
 struct mm_sensor_data {
     struct mm_sensor_stream_attr *attr[STREAM_TYPE_MAX];
     void *csi_params;
+    void *act_params;
     cam_capability_t *cap;
+    uint16_t gain_min;
+    uint16_t gain_max;
     uint32_t vfe_module_cfg;
     uint32_t vfe_clk_rate;
     uint16_t vfe_cfg_off;
     uint16_t vfe_dmux_cfg;
+    uint16_t stats_enable;
     uint8_t uses_sensor_ctrls;
-    uint8_t stats_enable;
     uint8_t csi_dev;
+    uint8_t act_id;
 };
-
 
 /* For legacy Camera Serial Interface */
 enum msm_camera_csic_data_format {
@@ -83,6 +95,17 @@ enum csic_cfg_type_t {
 struct csic_cfg_data {
     enum csic_cfg_type_t cfgtype;
     struct msm_camera_csic_params *csic_params;
+};
+
+struct mm_daemon_act_snsr_ops {
+    void (*get_damping_params)(uint16_t dest_step_pos, uint16_t curr_step_pos,
+        int32_t num_steps, int sign_dir,
+        struct damping_params_t *damping_params);
+};
+
+struct mm_daemon_act_params {
+    struct msm_actuator_set_info_t *act_info;
+    struct mm_daemon_act_snsr_ops *act_snsr_ops;
 };
 
 #define MSM_CAMERA_SUBDEV_CSIC 15

@@ -1,5 +1,5 @@
 /*
-   Copyright (C) 2018 Brian Stepp 
+   Copyright (C) 2014-2018 Brian Stepp
       steppnasty@gmail.com
 
    This program is free software; you can redistribute it and/or
@@ -24,11 +24,11 @@
 
 #include <sys/types.h>
 #include "mm_daemon.h"
-#include "mm_daemon_stats.h"
 #include "mm_daemon_sensor.h"
 #include "mm_daemon_sock.h"
 #include "mm_daemon_csi.h"
 #include "mm_daemon_led.h"
+#include "mm_daemon_actuator.h"
 #include "mm_daemon_util.h"
 
 static uint32_t isp_events[] = {
@@ -56,60 +56,46 @@ static uint32_t mm_daemon_config_v4l2_fmt(cam_format_t fmt)
 {
     uint32_t val;
     switch(fmt) {
-        case CAM_FORMAT_YUV_420_NV12:
-        case CAM_FORMAT_YUV_420_NV12_VENUS:
-            val = V4L2_PIX_FMT_NV12;
-            break;
-        case CAM_FORMAT_YUV_420_NV21:
-            val = V4L2_PIX_FMT_NV21;
-            break;
-        case CAM_FORMAT_BAYER_QCOM_RAW_10BPP_GBRG:
-        case CAM_FORMAT_BAYER_QCOM_RAW_10BPP_GRBG:
-        case CAM_FORMAT_BAYER_QCOM_RAW_10BPP_RGGB:
-        case CAM_FORMAT_BAYER_QCOM_RAW_10BPP_BGGR:
-            val = V4L2_PIX_FMT_SBGGR10;
-            break;
-        case CAM_FORMAT_YUV_422_NV61:
-            val = V4L2_PIX_FMT_NV61;
-            break;
-        case CAM_FORMAT_YUV_RAW_8BIT_YUYV:
-            val = V4L2_PIX_FMT_YUYV;
-            break;
-        case CAM_FORMAT_YUV_RAW_8BIT_YVYU:
-            val = V4L2_PIX_FMT_YVYU;
-            break;
-        case CAM_FORMAT_YUV_RAW_8BIT_UYVY:
-            val = V4L2_PIX_FMT_UYVY;
-            break;
-        case CAM_FORMAT_YUV_RAW_8BIT_VYUY:
-            val = V4L2_PIX_FMT_VYUY;
-            break;
-        case CAM_FORMAT_YUV_420_YV12:
-            val = V4L2_PIX_FMT_NV12;
-            break;
-        case CAM_FORMAT_YUV_422_NV16:
-            val = V4L2_PIX_FMT_NV16;
-            break;
-        default:
-            val = 0;
-            ALOGE("%s: Unknown fmt=%d", __func__, fmt);
-            break;
+    case CAM_FORMAT_YUV_420_NV12:
+    case CAM_FORMAT_YUV_420_NV12_VENUS:
+        val = V4L2_PIX_FMT_NV12;
+        break;
+    case CAM_FORMAT_YUV_420_NV21:
+        val = V4L2_PIX_FMT_NV21;
+        break;
+    case CAM_FORMAT_BAYER_QCOM_RAW_10BPP_GBRG:
+    case CAM_FORMAT_BAYER_QCOM_RAW_10BPP_GRBG:
+    case CAM_FORMAT_BAYER_QCOM_RAW_10BPP_RGGB:
+    case CAM_FORMAT_BAYER_QCOM_RAW_10BPP_BGGR:
+        val = V4L2_PIX_FMT_SBGGR10;
+        break;
+    case CAM_FORMAT_YUV_422_NV61:
+        val = V4L2_PIX_FMT_NV61;
+        break;
+    case CAM_FORMAT_YUV_RAW_8BIT_YUYV:
+        val = V4L2_PIX_FMT_YUYV;
+        break;
+    case CAM_FORMAT_YUV_RAW_8BIT_YVYU:
+        val = V4L2_PIX_FMT_YVYU;
+        break;
+    case CAM_FORMAT_YUV_RAW_8BIT_UYVY:
+        val = V4L2_PIX_FMT_UYVY;
+        break;
+    case CAM_FORMAT_YUV_RAW_8BIT_VYUY:
+        val = V4L2_PIX_FMT_VYUY;
+        break;
+    case CAM_FORMAT_YUV_420_YV12:
+        val = V4L2_PIX_FMT_NV12;
+        break;
+    case CAM_FORMAT_YUV_422_NV16:
+        val = V4L2_PIX_FMT_NV16;
+        break;
+    default:
+        val = 0;
+        ALOGE("%s: Unknown fmt=%d", __func__, fmt);
+        break;
     }
     return val;
-}
-
-static void mm_daemon_config_stats_cmd(mm_daemon_stats_t *mm_stats,
-        uint8_t cmd, int32_t val)
-{
-    int len;
-    mm_daemon_pipe_evt_t pipe_cmd;
-
-    memset(&pipe_cmd, 0, sizeof(pipe_cmd));
-    pipe_cmd.cmd = cmd;
-    pipe_cmd.val = val;
-    len = write(mm_stats->pfds[1], &pipe_cmd, sizeof(pipe_cmd));
-    if (len < 1)
-        ALOGI("%s: write error", __FUNCTION__);
 }
 
 static void mm_daemon_config_parm_flash(mm_daemon_cfg_t *cfg_obj, int32_t mode)
@@ -196,8 +182,6 @@ static void mm_daemon_config_parm(mm_daemon_cfg_t *cfg_obj)
                     if (cfg_obj->sdata->uses_sensor_ctrls)
                         mm_daemon_util_subdev_cmd(cfg_obj->info[SNSR_DEV],
                                 SENSOR_CMD_WB, *cvalue, 0);
-                    else if (cfg_obj->vfe_started)
-                        cfg_obj->wb_changed = 1;
                 }
                 break;
             }
@@ -420,6 +404,11 @@ static void mm_daemon_config_parm(mm_daemon_cfg_t *cfg_obj)
     }
 }
 
+static int32_t mm_daemon_config_get_parm(mm_daemon_cfg_t *cfg_obj, int parm)
+{
+    return *(int32_t *)POINTER_OF(parm, cfg_obj->parm_buf.cfg_buf);
+}
+
 static int mm_daemon_config_subscribe(mm_daemon_cfg_t *cfg_obj,
         uint32_t type, int subscribe)
 {
@@ -435,40 +424,22 @@ static int mm_daemon_config_subscribe(mm_daemon_cfg_t *cfg_obj,
     return rc;
 }
 
-static void mm_daemon_config_set_current_streams(mm_daemon_cfg_t *cfg_obj,
-        cam_stream_type_t hal_stream_type, uint8_t set)
+static void mm_daemon_config_stream_set(mm_daemon_cfg_t *cfg_obj,
+        cam_stream_type_t stream_type, uint8_t set)
 {
-    uint8_t stream_type;
-    switch (hal_stream_type) {
-        case CAM_STREAM_TYPE_PREVIEW:
-            stream_type = DAEMON_STREAM_TYPE_PREVIEW;
-            break;
-        case CAM_STREAM_TYPE_POSTVIEW:
-            stream_type = DAEMON_STREAM_TYPE_POSTVIEW;
-            break;
-        case CAM_STREAM_TYPE_SNAPSHOT:
-            stream_type = DAEMON_STREAM_TYPE_SNAPSHOT;
-            break;
-        case CAM_STREAM_TYPE_VIDEO:
-            stream_type = DAEMON_STREAM_TYPE_VIDEO;
-            break;
-        case CAM_STREAM_TYPE_METADATA:
-            stream_type = DAEMON_STREAM_TYPE_METADATA;
-            break;
-        case CAM_STREAM_TYPE_RAW:
-            stream_type = DAEMON_STREAM_TYPE_RAW;
-            break;
-        case CAM_STREAM_TYPE_OFFLINE_PROC:
-            stream_type = DAEMON_STREAM_TYPE_OFFLINE_PROC;
-            break;
-        default:
-            ALOGE("%s: unknown stream type", __FUNCTION__);
-            return;
-    }
     if (set)
-        cfg_obj->current_streams |= stream_type;
+        cfg_obj->current_streams |= BIT(stream_type);
     else
-        cfg_obj->current_streams &= ~stream_type;
+        cfg_obj->current_streams &= ~BIT(stream_type);
+}
+
+static uint8_t mm_daemon_config_streaming(mm_daemon_cfg_t *cfg_obj,
+        uint32_t stream_type)
+{
+    if ((cfg_obj->current_streams & stream_type) == stream_type)
+        return TRUE;
+
+    return FALSE;
 }
 
 static mm_daemon_buf_info *mm_daemon_get_stream_buf(mm_daemon_cfg_t *cfg_obj,
@@ -557,12 +528,8 @@ static int mm_daemon_config_isp_metadata_buf_done(mm_daemon_cfg_t *cfg_obj,
 static void mm_daemon_config_isp_set_metadata(mm_daemon_cfg_t *cfg_obj,
         struct v4l2_event *isp_event, uint32_t buf_idx)
 {
-    uint32_t i;
     struct msm_isp_event_data *buf_event;
-    enum msm_isp_stats_type stats_type;
-    mm_daemon_stats_t *mm_stats;
     cam_metadata_info_t *meta;
-    mm_daemon_stats_buf_info *stat;
     mm_daemon_buf_info *buf = mm_daemon_get_stream_buf(cfg_obj,
             CAM_STREAM_TYPE_METADATA);
 
@@ -576,83 +543,21 @@ static void mm_daemon_config_isp_set_metadata(mm_daemon_cfg_t *cfg_obj,
         return;
     memset(meta, 0, sizeof(cam_metadata_info_t));
 
-    if ((cfg_obj->current_streams & DAEMON_STREAM_TYPE_SNAPSHOT) &&
-                (cfg_obj->current_streams & DAEMON_STREAM_TYPE_POSTVIEW)) {
+    if (mm_daemon_config_streaming(cfg_obj, SB(SNAPSHOT)|SB(POSTVIEW))) {
         meta->is_prep_snapshot_done_valid = 1;
-        meta->prep_snapshot_done_state = DO_NOT_NEED_FUTURE_FRAME;
         meta->is_good_frame_idx_range_valid = 0;
-        meta->meta_valid_params.meta_frame_id = buf_event->frame_id;
-        meta->is_meta_valid = 1;
     } else {
-        if (cfg_obj->sdata->stats_enable) {
-            for (i = 0; i < ARRAY_SIZE(vfe_stats); i++) {
-                stats_type = vfe_stats[i];
-                stat = cfg_obj->stats_buf[stats_type];
-                if (!stat)
-                    goto metadata_done;
-                pthread_mutex_lock(&stat->stat_lock);
-                mm_stats = (mm_daemon_stats_t *)stat->mm_stats;
-                if (!mm_stats) {
-                    pthread_mutex_unlock(&stat->stat_lock);
-                    goto metadata_done;
-                }
-                if (mm_stats->done_work.ready) {
-                    switch (stats_type) {
-                        case MSM_ISP_STATS_AEC: {
-                            uint32_t gain = mm_stats->done_work.val;
-                            uint32_t flash_needed = 0;
-                            int32_t *led_mode = (int32_t *)POINTER_OF(
-                                    CAM_INTF_PARM_LED_MODE,
-                                    cfg_obj->parm_buf.cfg_buf);
-                            if ((gain != cfg_obj->curr_gain || gain == 512) &&
-                                    !cfg_obj->gain_changed) {
-                                cfg_obj->curr_gain = gain;
-                                cfg_obj->gain_changed = 1;
-                            }
-
-                            if ((*led_mode == CAM_FLASH_MODE_ON) ||
-                                    (*led_mode == CAM_FLASH_MODE_AUTO &&
-                                    gain == 512))
-                                flash_needed = 1;
-
-                            if (cfg_obj->preparing_snapshot) {
-                                cfg_obj->curr_gain = DEFAULT_EXP_GAIN;
-                                meta->is_prep_snapshot_done_valid = 1;
-                                meta->prep_snapshot_done_state =
-                                        DO_NOT_NEED_FUTURE_FRAME;
-                            }
-
-                            if (mm_stats->done_work.len)
-                                memcpy(&meta->chromatix_lite_ae_stats_data.
-                                        private_stats_data[0],
-                                        mm_stats->done_work.buf,
-                                        mm_stats->done_work.len);
-                            meta->is_chromatix_lite_ae_stats_valid = 1;
-                            meta->is_ae_params_valid = 1;
-                            meta->ae_params.flash_needed = flash_needed;
-                            break;
-                        }
-                        case MSM_ISP_STATS_AWB: {
-                            if (mm_stats->done_work.val)
-                                memcpy(&meta->chromatix_lite_awb_stats_data.
-                                        private_stats_data[0],
-                                        mm_stats->done_work.buf,
-                                        mm_stats->done_work.len);
-                            meta->is_chromatix_lite_awb_stats_valid = 1;
-                            break;
-                        }
-                        default:
-                            break;
-                    }
-                    mm_stats->done_work.ready = 0;
-                }
-                pthread_mutex_unlock(&stat->stat_lock);
-            }
-        }
-        meta->meta_valid_params.meta_frame_id = buf_event->frame_id;
-        meta->is_meta_valid = 1;
+        meta->is_ae_params_valid = cfg_obj->ae.meta.is_ae_params_valid;
+        meta->ae_params.flash_needed = cfg_obj->ae.flash_needed;
+        meta->is_prep_snapshot_done_valid =
+                cfg_obj->ae.meta.is_prep_snapshot_done_valid;
+        meta->focus_data.focus_state = cfg_obj->af.meta.state;
+        meta->is_focus_valid = cfg_obj->af.meta.is_focus_valid;
     }
-metadata_done:
+    memset(&cfg_obj->ae.meta, 0, sizeof(struct mm_daemon_ae_metadata));
+    memset(&cfg_obj->af.meta, 0, sizeof(struct mm_daemon_af_metadata));
+    meta->meta_valid_params.meta_frame_id = buf_event->frame_id;
+    meta->is_meta_valid = 1;
     munmap(meta, sizeof(cam_metadata_info_t));
 }
 
@@ -749,7 +654,7 @@ static int mm_daemon_config_isp_stream_request(mm_daemon_cfg_t *cfg_obj,
             stream_cfg_cmd.stream_src = PIX_ENCODER;
             break;
         case CAM_STREAM_TYPE_PREVIEW:
-            if (cfg_obj->current_streams & DAEMON_STREAM_TYPE_VIDEO)
+            if (mm_daemon_config_streaming(cfg_obj, SB(VIDEO)))
                 stream_cfg_cmd.stream_src = PIX_VIEWFINDER;
             else
                 stream_cfg_cmd.stream_src = CAMIF_RAW;
@@ -801,28 +706,28 @@ static int mm_daemon_config_isp_stream_cfg(mm_daemon_cfg_t *cfg_obj,
     pthread_mutex_lock(&cfg_obj->lock);
     memset(&stream_cfg_cmd, 0, sizeof(stream_cfg_cmd));
     switch (stream_type) {
-        case CAM_STREAM_TYPE_PREVIEW:
-        case CAM_STREAM_TYPE_VIDEO:
-            stream_cfg_cmd.num_streams = 1;
-            if (buf->stream_info_mapped)
-                stream_cfg_cmd.stream_handle[0] = buf->stream_handle[0];
-            else
-                goto err_fail;
-            break;
-        case CAM_STREAM_TYPE_SNAPSHOT:
-            if (buf->stream_info_mapped)
-                stream_cfg_cmd.stream_handle[0] = buf->stream_handle[0];
-            else
-                goto err_fail;
-            buf = mm_daemon_get_stream_buf(cfg_obj, CAM_STREAM_TYPE_POSTVIEW);
-            if (buf && buf->stream_info_mapped)
-                stream_cfg_cmd.stream_handle[1] = buf->stream_handle[0];
-            else
-                goto err_fail;
-            stream_cfg_cmd.num_streams = 2;
-            break;
-        default:
+    case CAM_STREAM_TYPE_PREVIEW:
+    case CAM_STREAM_TYPE_VIDEO:
+        stream_cfg_cmd.num_streams = 1;
+        if (buf->stream_info_mapped)
+            stream_cfg_cmd.stream_handle[0] = buf->stream_handle[0];
+        else
             goto err_fail;
+        break;
+    case CAM_STREAM_TYPE_SNAPSHOT:
+        if (buf->stream_info_mapped)
+            stream_cfg_cmd.stream_handle[0] = buf->stream_handle[0];
+        else
+            goto err_fail;
+        buf = mm_daemon_get_stream_buf(cfg_obj, CAM_STREAM_TYPE_POSTVIEW);
+        if (buf && buf->stream_info_mapped)
+            stream_cfg_cmd.stream_handle[1] = buf->stream_handle[0];
+        else
+            goto err_fail;
+        stream_cfg_cmd.num_streams = 2;
+        break;
+    default:
+        goto err_fail;
     }
     stream_cfg_cmd.cmd = cmd;
 
@@ -969,7 +874,6 @@ static int mm_daemon_config_vfe_reset(mm_daemon_cfg_t *cfg_obj)
             },
             .cmd_type = VFE_WRITE_MB,
         },
-                
     };
 
     rstdata = (uint32_t *)malloc(28);
@@ -1027,7 +931,6 @@ static int mm_daemon_config_vfe_roll_off(mm_daemon_cfg_t *cfg_obj,
             },
             .cmd_type = VFE_WRITE,
         },
-                
     };
 
     if (stream_type == CAM_STREAM_TYPE_SNAPSHOT)
@@ -1521,7 +1424,6 @@ static int mm_daemon_config_vfe_fov(mm_daemon_cfg_t *cfg_obj,
             },
             .cmd_type = VFE_WRITE,
         },
-                
     };
 
     buf = mm_daemon_get_stream_buf(cfg_obj, stream_type);
@@ -1586,7 +1488,6 @@ static int mm_daemon_config_vfe_main_scaler(mm_daemon_cfg_t *cfg_obj,
             },
             .cmd_type = VFE_WRITE,
         },
-                
     };
 
     buf = mm_daemon_get_stream_buf(cfg_obj, stream_type);
@@ -1640,10 +1541,9 @@ static int mm_daemon_config_vfe_s2y(mm_daemon_cfg_t *cfg_obj,
             },
             .cmd_type = VFE_WRITE,
         },
-                
     };
 
-    if (cfg_obj->current_streams & DAEMON_STREAM_TYPE_POSTVIEW)
+    if (mm_daemon_config_streaming(cfg_obj, SB(POSTVIEW)))
         buf = mm_daemon_get_stream_buf(cfg_obj, CAM_STREAM_TYPE_POSTVIEW);
     else
         buf = mm_daemon_get_stream_buf(cfg_obj, stream_type);
@@ -1652,7 +1552,7 @@ static int mm_daemon_config_vfe_s2y(mm_daemon_cfg_t *cfg_obj,
     dim = buf->stream_info->dim;
     s2y_width = dim.width << 16;
     s2y_height = dim.height << 16;
-    if (cfg_obj->current_streams & DAEMON_STREAM_TYPE_POSTVIEW) {
+    if (mm_daemon_config_streaming(cfg_obj, SB(POSTVIEW))) {
         buf = mm_daemon_get_stream_buf(cfg_obj, stream_type);
         if (!buf)
             return -ENOMEM;
@@ -1692,10 +1592,9 @@ static int mm_daemon_config_vfe_s2cbcr(mm_daemon_cfg_t *cfg_obj,
             },
             .cmd_type = VFE_WRITE,
         },
-                
     };
 
-    if (cfg_obj->current_streams & DAEMON_STREAM_TYPE_POSTVIEW)
+    if (mm_daemon_config_streaming(cfg_obj, SB(POSTVIEW)))
         buf = mm_daemon_get_stream_buf(cfg_obj, CAM_STREAM_TYPE_POSTVIEW);
     else
         buf = mm_daemon_get_stream_buf(cfg_obj, stream_type);
@@ -1705,7 +1604,7 @@ static int mm_daemon_config_vfe_s2cbcr(mm_daemon_cfg_t *cfg_obj,
     s2cbcr_width = (dim.width/2) << 16;
     s2cbcr_height = (dim.height/2) << 16;
 
-    if (cfg_obj->current_streams & DAEMON_STREAM_TYPE_POSTVIEW) {
+    if (mm_daemon_config_streaming(cfg_obj, SB(POSTVIEW))) {
         buf = mm_daemon_get_stream_buf(cfg_obj, stream_type);
         if (!buf)
             return -ENOMEM;
@@ -1827,7 +1726,6 @@ static int mm_daemon_config_vfe_chroma_en(mm_daemon_cfg_t *cfg_obj)
             },
             .cmd_type = VFE_WRITE,
         },
-                
     };
 
     if (cfg_obj->sdata->uses_sensor_ctrls)
@@ -1863,7 +1761,6 @@ static int mm_daemon_config_vfe_color_cor(mm_daemon_cfg_t *cfg_obj)
             },
             .cmd_type = VFE_WRITE,
         },
-                
     };
 
     if (cfg_obj->sdata->uses_sensor_ctrls)
@@ -1900,7 +1797,6 @@ static int mm_daemon_config_vfe_asf(mm_daemon_cfg_t *cfg_obj,
             },
             .cmd_type = VFE_WRITE,
         },
-                
     };
 
     if (cfg_obj->sdata->uses_sensor_ctrls)
@@ -1939,11 +1835,10 @@ static int mm_daemon_config_vfe_asf(mm_daemon_cfg_t *cfg_obj,
     return rc;
 }
 
-static int mm_daemon_config_vfe_white_balance(mm_daemon_cfg_t *cfg_obj,
-        cam_stream_type_t stream_type)
+static int mm_daemon_config_vfe_white_balance(mm_daemon_cfg_t *cfg_obj)
 {
     int rc = 0;
-    int32_t *wb_parm;
+    int32_t wb;
     uint32_t wb_cfg;
     struct msm_vfe_reg_cfg_cmd reg_cfg_cmd[] = {
         {
@@ -1953,31 +1848,29 @@ static int mm_daemon_config_vfe_white_balance(mm_daemon_cfg_t *cfg_obj,
             },
             .cmd_type = VFE_WRITE,
         },
-                
     };
 
     if (cfg_obj->sdata->uses_sensor_ctrls)
         return 0;
 
-    if (stream_type == CAM_STREAM_TYPE_SNAPSHOT)
+    if (mm_daemon_config_streaming(cfg_obj, SB(SNAPSHOT)|SB(POSTVIEW)))
         wb_cfg = 0x02010080;
     else {
-        wb_parm = (int32_t *)POINTER_OF(CAM_INTF_PARM_WHITE_BALANCE,
-                cfg_obj->parm_buf.cfg_buf);
-        switch(*wb_parm) {
-            case CAM_WB_MODE_INCANDESCENT:
-                wb_cfg = 0x272928E;
-                break;
-            case CAM_WB_MODE_DAYLIGHT:
-                wb_cfg = 0x389728D;
-                break;
-            case CAM_WB_MODE_AUTO:
-                wb_cfg = 0x33E5A8D;
-                break;
-            case CAM_WB_MODE_FLUORESCENT: 
-            default:
-                wb_cfg = 0x33E5A8D;
-                break;
+        wb = mm_daemon_config_get_parm(cfg_obj, CAM_INTF_PARM_WHITE_BALANCE);
+        switch(wb) {
+        case CAM_WB_MODE_INCANDESCENT:
+            wb_cfg = 0x272928E;
+            break;
+        case CAM_WB_MODE_DAYLIGHT:
+            wb_cfg = 0x389728D;
+            break;
+        case CAM_WB_MODE_AUTO:
+            wb_cfg = 0x33E5A8D;
+            break;
+        case CAM_WB_MODE_FLUORESCENT:
+        default:
+            wb_cfg = 0x33E5A8D;
+            break;
         }
     }
 
@@ -1998,7 +1891,6 @@ static int mm_daemon_config_vfe_black_level(mm_daemon_cfg_t *cfg_obj)
             },
             .cmd_type = VFE_WRITE,
         },
-                
     };
 
     if (cfg_obj->sdata->uses_sensor_ctrls)
@@ -2065,12 +1957,11 @@ static int mm_daemon_config_vfe_rgb_gamma_chbank(mm_daemon_cfg_t *cfg_obj, int b
             },
             .cmd_type = VFE_WRITE,
         },
-                
     };
 
     if (cfg_obj->sdata->uses_sensor_ctrls)
         return 0;
-               
+
     gamma_cfg = (uint32_t *)malloc(144);
     p = gamma_cfg;
     *p++ = banksel_val;
@@ -2174,7 +2065,7 @@ static int mm_daemon_config_vfe_camif(mm_daemon_cfg_t *cfg_obj,
     *p++ = 0xffffffff;
     *p++ = 0x00;
     *p++ = 0x3fff3fff;
-    
+
     rc = mm_daemon_config_vfe_reg_cmd(cfg_obj, 32, (void *)camif_cfg,
             (void *)&reg_cfg_cmd, ARRAY_SIZE(reg_cfg_cmd));
     free(camif_cfg);
@@ -2563,7 +2454,7 @@ static int mm_daemon_config_vfe_stats_af(mm_daemon_cfg_t *cfg_obj)
     struct msm_vfe_reg_cfg_cmd reg_cfg_cmd[] = {
         {
             .u.rw_info = {
-                .reg_offset = 0x54c,
+                .reg_offset = 0x53C,
                 .len = 16,
             },
             .cmd_type = VFE_WRITE,
@@ -2618,72 +2509,45 @@ static int mm_daemon_config_vfe_mce(mm_daemon_cfg_t *cfg_obj)
     return rc;
 }
 
-static void mm_daemon_config_stats_stream_request(mm_daemon_cfg_t *cfg_obj)
+static uint32_t mm_daemon_config_stats_stream_request(mm_daemon_cfg_t *cfg_obj,
+        int stats_type)
 {
-    int isp_stat;
-    size_t i;
     struct msm_vfe_stats_stream_request_cmd stream_req_cmd;
     mm_daemon_stats_buf_info *stat = NULL;
 
-    for (i = 0; i < ARRAY_SIZE(vfe_stats); i++) {
-        stat = cfg_obj->stats_buf[vfe_stats[i]];
-        if (!stat) {
-            continue;
-        }
-        memset(&stream_req_cmd, 0, sizeof(stream_req_cmd));
-        isp_stat = ISP_EVENT_STATS_NOTIFY + vfe_stats[i];
-        stream_req_cmd.session_id = cfg_obj->session_id;
-        stream_req_cmd.stream_id = stat->stream_id;
-        stream_req_cmd.stats_type = vfe_stats[i];
-        stream_req_cmd.buffer_offset = 0;
-        stream_req_cmd.framedrop_pattern = NO_SKIP;
-        if ((ioctl(cfg_obj->vfe_fd, VIDIOC_MSM_ISP_REQUEST_STATS_STREAM,
-                &stream_req_cmd)) < 0)
-            continue;
-        mm_daemon_config_subscribe(cfg_obj, isp_stat, 1);
-        stat->stream_handle = stream_req_cmd.stream_handle;
-    }
+    stat = cfg_obj->stats_buf[stats_type];
+    if (!stat)
+            return 0;
+
+    memset(&stream_req_cmd, 0, sizeof(stream_req_cmd));
+    stream_req_cmd.session_id = cfg_obj->session_id;
+    stream_req_cmd.stream_id = stat->stream_id;
+    stream_req_cmd.stats_type = stats_type;
+    stream_req_cmd.buffer_offset = 0;
+    stream_req_cmd.framedrop_pattern = NO_SKIP;
+
+    if (ioctl(cfg_obj->vfe_fd, VIDIOC_MSM_ISP_REQUEST_STATS_STREAM,
+            &stream_req_cmd) < 0)
+        return 0;
+
+    mm_daemon_config_subscribe(cfg_obj, ISP_EVENT_STATS_NOTIFY + stats_type, 1);
+    return stream_req_cmd.stream_handle;
 }
 
-static void mm_daemon_config_stats_stream_release(mm_daemon_cfg_t *cfg_obj)
+static void mm_daemon_config_stats_stream_release(mm_daemon_cfg_t *cfg_obj,
+        int stats_type)
 {
-    int isp_stat;
-    size_t i;
-    struct msm_vfe_stats_stream_release_cmd stream_release_cmd;
-    mm_daemon_stats_buf_info *stat = NULL;
+    struct msm_vfe_stats_stream_release_cmd cmd;
+    mm_daemon_stats_buf_info *stat = cfg_obj->stats_buf[stats_type];
 
-    for (i = 0; i < ARRAY_SIZE(vfe_stats); i++) {
-        stat = cfg_obj->stats_buf[vfe_stats[i]];
-        if (!stat)
-            continue;
-        memset(&stream_release_cmd, 0, sizeof(stream_release_cmd));
-        isp_stat = ISP_EVENT_STATS_NOTIFY + vfe_stats[i];
-        stream_release_cmd.stream_handle = stat->stream_handle;
-        ioctl(cfg_obj->vfe_fd, VIDIOC_MSM_ISP_RELEASE_STATS_STREAM,
-                &stream_release_cmd);
-        mm_daemon_config_subscribe(cfg_obj, isp_stat, 0);
-        stat->stream_handle = 0;
-    }
-}
+    if (!stat)
+        return;
 
-static int mm_daemon_config_stats_stream_cfg(mm_daemon_cfg_t *cfg_obj,
-        uint8_t enable)
-{
-    size_t i;
-    struct msm_vfe_stats_stream_cfg_cmd stream_cfg_cmd;
-
-    memset(&stream_cfg_cmd, 0, sizeof(stream_cfg_cmd));
-    stream_cfg_cmd.enable = enable;
-    stream_cfg_cmd.num_streams = ARRAY_SIZE(vfe_stats);
-    for (i = 0; i < ARRAY_SIZE(vfe_stats); i++) {
-        mm_daemon_stats_buf_info *stat = cfg_obj->stats_buf[vfe_stats[i]];
-        if (!stat)
-            continue;
-        stream_cfg_cmd.stream_handle[i] = stat->stream_handle;
-    }
-    
-    return ioctl(cfg_obj->vfe_fd, VIDIOC_MSM_ISP_CFG_STATS_STREAM,
-            &stream_cfg_cmd);
+    memset(&cmd, 0, sizeof(cmd));
+    cmd.stream_handle = stat->stream_handle;
+    ioctl(cfg_obj->vfe_fd, VIDIOC_MSM_ISP_RELEASE_STATS_STREAM, &cmd);
+    mm_daemon_config_subscribe(cfg_obj, ISP_EVENT_STATS_NOTIFY + stats_type, 0);
+    stat->stream_handle = 0;
 }
 
 static int mm_daemon_config_stats_buf_alloc(mm_daemon_cfg_t *cfg_obj)
@@ -2699,7 +2563,7 @@ static int mm_daemon_config_stats_buf_alloc(mm_daemon_cfg_t *cfg_obj)
     for (i = 0; i < ARRAY_SIZE(vfe_stats); i++) {
         stats_type = vfe_stats[i];
         stat = cfg_obj->stats_buf[stats_type];
-        len = mm_daemon_stats_size(stats_type);
+        len = 1000;
         if (!stat || !len)
             continue;
         for (j = 0; j < stat->buf_cnt; j++) {
@@ -2744,14 +2608,10 @@ static void mm_daemon_config_stats_buf_dealloc(mm_daemon_cfg_t *cfg_obj)
     size_t i;
     struct ion_handle_data handle_data;
     mm_daemon_stats_buf_info *stat = NULL;
-    mm_daemon_stats_t *mm_stats = NULL;
 
     for (i = 0; i < ARRAY_SIZE(vfe_stats); i++) {
         stat = cfg_obj->stats_buf[vfe_stats[i]];
         if (!stat)
-            continue;
-        mm_stats = (mm_daemon_stats_t *)stat->mm_stats;
-        if (!mm_stats)
             continue;
 
         for (j = 0; j < stat->buf_cnt; j++) {
@@ -2779,7 +2639,7 @@ static void mm_daemon_config_stats_buf_dealloc(mm_daemon_cfg_t *cfg_obj)
 static int mm_daemon_config_stats_buf_request(mm_daemon_cfg_t *cfg_obj)
 {
     int rc = 0;
-    int num_buf = DAEMON_STATS_BUF_CNT;
+    int num_buf = STATS_BUFFER_MAX;
     size_t i;
     uint32_t stream_id;
     enum msm_isp_stats_type type;
@@ -2853,7 +2713,6 @@ static int mm_daemon_config_stats_buf_requeue(mm_daemon_cfg_t *cfg_obj,
     mm_daemon_stats_buf_info *stat;
 
     stat = cfg_obj->stats_buf[stats_type];
-    
     memset(&qbuf_info, 0, sizeof(qbuf_info));
     qbuf_info.dirty_buf = 1;
     qbuf_info.buf_idx = buf_idx;
@@ -2876,42 +2735,65 @@ static void mm_daemon_config_stats_buf_release(mm_daemon_cfg_t *cfg_obj)
     }
 }
 
-static int mm_daemon_config_stats_start(mm_daemon_cfg_t *cfg_obj)
+static void mm_daemon_config_stats(mm_daemon_cfg_t *cfg_obj, uint16_t req_stats,
+        int enable)
 {
-    int rc = -1;
-    size_t i;
+    size_t i, j;
+    uint16_t stats = 0;
+    struct msm_vfe_stats_stream_cfg_cmd cc;
 
-    if (!cfg_obj->sdata->stats_enable)
-        return 0;
-    mm_daemon_config_stats_stream_request(cfg_obj);
-    mm_daemon_config_stats_stream_cfg(cfg_obj, 1);
-    for (i = 0; i < ARRAY_SIZE(vfe_stats); i++) {
-        switch (vfe_stats[i]) {
-            case MSM_ISP_STATS_AEC:
-                rc = mm_daemon_config_vfe_stats_aec(cfg_obj);
-                break;
-            case MSM_ISP_STATS_AWB:
-                rc = mm_daemon_config_vfe_stats_awb(cfg_obj);
-                break;
-            case MSM_ISP_STATS_AF:
-                rc = mm_daemon_config_vfe_stats_af(cfg_obj);
-                break;
-            default:
-                ALOGE("%s: unsupported stats type", __FUNCTION__);
-                break;
+    if ((cfg_obj->sdata->stats_enable & req_stats) == 0)
+        return;
+
+    memset(&cc, 0, sizeof(cc));
+    cc.enable = enable;
+    for (i = 0, j = 0; i < MSM_ISP_STATS_MAX; i++) {
+        if (!((req_stats >> i) & 0x1) || !cfg_obj->stats_buf[i])
+            continue;
+
+        if ((enable && (BIT(i) & cfg_obj->enabled_stats)) ||
+                (!enable && !(BIT(i) & cfg_obj->enabled_stats)))
+            continue;
+
+        if (enable)
+            cfg_obj->stats_buf[i]->stream_handle =
+                    mm_daemon_config_stats_stream_request(cfg_obj, i);
+        if (cfg_obj->stats_buf[i]->stream_handle) {
+            stats |= BIT(i);
+            cc.stream_handle[cc.num_streams] =
+                    cfg_obj->stats_buf[i]->stream_handle;
+            cc.num_streams++;
+        }
+        req_stats &= ~BIT(i);
+        if (!req_stats)
+            break;
+    }
+    if (!cc.num_streams)
+        return;
+
+    if (ioctl(cfg_obj->vfe_fd, VIDIOC_MSM_ISP_CFG_STATS_STREAM, &cc) == 0) {
+        for (i = 0; i < MSM_ISP_STATS_MAX; i++) {
+            if ((stats >> i) & 0x1) {
+                if (enable) {
+                    if (cfg_obj->stats_buf[i]->ops.start)
+                        cfg_obj->stats_buf[i]->ops.start(cfg_obj);
+                } else
+                    mm_daemon_config_stats_stream_release(cfg_obj, i);
+            }
         }
     }
-    cfg_obj->stats_started = 1;
-    return rc;
+
+    if (enable)
+        cfg_obj->enabled_stats |= stats;
+    else
+        cfg_obj->enabled_stats &= ~stats;
 }
 
-static void mm_daemon_config_stats_stop(mm_daemon_cfg_t *cfg_obj)
+static void mm_daemon_config_exp_gain(mm_daemon_cfg_t *cfg_obj, uint16_t gain)
 {
-    if (!cfg_obj->sdata->stats_enable)
-        return;
-    mm_daemon_config_stats_stream_cfg(cfg_obj, 0);
-    mm_daemon_config_stats_stream_release(cfg_obj);
-    cfg_obj->stats_started = 0;
+    mm_daemon_util_subdev_cmd(cfg_obj->info[SNSR_DEV],
+            SENSOR_CMD_EXP_GAIN, gain, 0);
+    cfg_obj->ae.curr_gain = gain;
 }
 
 static int mm_daemon_config_start_preview(mm_daemon_cfg_t *cfg_obj)
@@ -2921,6 +2803,14 @@ static int mm_daemon_config_start_preview(mm_daemon_cfg_t *cfg_obj)
 
     if (!buf)
         return -ENOMEM;
+
+    if (cfg_obj->info[CSI_DEV])
+        mm_daemon_util_subdev_cmd(cfg_obj->info[CSI_DEV], CSI_CMD_CFG, 0, 0);
+
+    mm_daemon_util_subdev_cmd(cfg_obj->info[SNSR_DEV],
+            SENSOR_CMD_PREVIEW, 0, 1);
+    mm_daemon_config_exp_gain(cfg_obj, cfg_obj->ae.curr_gain);
+
     if (buf->stream_info->num_bufs)
         mm_daemon_config_isp_buf_enqueue(cfg_obj, stream_type);
     mm_daemon_config_vfe_roll_off(cfg_obj, stream_type);
@@ -2932,7 +2822,7 @@ static int mm_daemon_config_start_preview(mm_daemon_cfg_t *cfg_obj)
     mm_daemon_config_vfe_chroma_en(cfg_obj);
     mm_daemon_config_vfe_color_cor(cfg_obj);
     mm_daemon_config_vfe_asf(cfg_obj, stream_type);
-    mm_daemon_config_vfe_white_balance(cfg_obj, stream_type);
+    mm_daemon_config_vfe_white_balance(cfg_obj);
     mm_daemon_config_vfe_black_level(cfg_obj);
     mm_daemon_config_vfe_mce(cfg_obj);
     mm_daemon_config_vfe_rgb_gamma(cfg_obj);
@@ -2958,16 +2848,18 @@ static void mm_daemon_config_stop_preview(mm_daemon_cfg_t *cfg_obj)
 
     mm_daemon_config_isp_stream_cfg(cfg_obj, stream_type, STOP_STREAM);
     mm_daemon_config_isp_stream_release(cfg_obj, stream_type);
-    if (cfg_obj->preparing_snapshot)
+    if (cfg_obj->prep_snapshot)
         mm_daemon_util_subdev_cmd(cfg_obj->info[LED_DEV],
             LED_CMD_CONTROL, MSM_CAMERA_LED_OFF, 0);
     mm_daemon_config_vfe_stop(cfg_obj);
-    cfg_obj->vfe_started = 0;
 }
 
 static void mm_daemon_config_prepare_snapshot(mm_daemon_cfg_t *cfg_obj)
 {
-    cfg_obj->preparing_snapshot = 1;
+    if (!cfg_obj->info[LED_DEV])
+        return;
+
+    cfg_obj->prep_snapshot = 1;
     mm_daemon_util_subdev_cmd(cfg_obj->info[LED_DEV],
             LED_CMD_CONTROL, MSM_CAMERA_LED_LOW, 0);
 }
@@ -2976,6 +2868,10 @@ static int mm_daemon_config_start_snapshot(mm_daemon_cfg_t *cfg_obj)
 {
     cam_stream_type_t stream_type = CAM_STREAM_TYPE_SNAPSHOT;
 
+    mm_daemon_util_subdev_cmd(cfg_obj->info[SNSR_DEV],
+            SENSOR_CMD_SNAPSHOT, 0, 1);
+    if (cfg_obj->prep_snapshot)
+        mm_daemon_config_exp_gain(cfg_obj, cfg_obj->ae.curr_gain / 4);
     mm_daemon_config_vfe_roll_off(cfg_obj, stream_type);
     mm_daemon_config_vfe_fov(cfg_obj, stream_type);
     mm_daemon_config_vfe_main_scaler(cfg_obj, stream_type);
@@ -2985,17 +2881,17 @@ static int mm_daemon_config_start_snapshot(mm_daemon_cfg_t *cfg_obj)
     mm_daemon_config_vfe_chroma_en(cfg_obj);
     mm_daemon_config_vfe_color_cor(cfg_obj);
     mm_daemon_config_vfe_asf(cfg_obj, stream_type);
-    mm_daemon_config_vfe_white_balance(cfg_obj, stream_type);
+    mm_daemon_config_vfe_white_balance(cfg_obj);
     mm_daemon_config_vfe_black_level(cfg_obj);
     mm_daemon_config_vfe_rgb_gamma(cfg_obj);
     mm_daemon_config_vfe_rgb_gamma_chbank(cfg_obj, 2);
     mm_daemon_config_vfe_rgb_gamma_chbank(cfg_obj, 4);
     mm_daemon_config_vfe_rgb_gamma_chbank(cfg_obj, 6);
     mm_daemon_config_vfe_rgb_gamma_chbank(cfg_obj, 12);
-    if (cfg_obj->preparing_snapshot) {
+    if (cfg_obj->prep_snapshot) {
         mm_daemon_util_subdev_cmd(cfg_obj->info[LED_DEV],
                 LED_CMD_CONTROL, MSM_CAMERA_LED_HIGH, 0);
-        cfg_obj->preparing_snapshot = 0;
+        cfg_obj->prep_snapshot = 0;
     }
     mm_daemon_config_vfe_camif(cfg_obj, stream_type);
     mm_daemon_config_vfe_demux(cfg_obj, stream_type);
@@ -3010,17 +2906,16 @@ static int mm_daemon_config_start_snapshot(mm_daemon_cfg_t *cfg_obj)
 
 static void mm_daemon_config_stop_snapshot(mm_daemon_cfg_t *cfg_obj)
 {
-    if (cfg_obj->preparing_snapshot) {
+    if (cfg_obj->prep_snapshot) {
         mm_daemon_util_subdev_cmd(cfg_obj->info[LED_DEV],
                 LED_CMD_CONTROL, MSM_CAMERA_LED_OFF, 0);
-        cfg_obj->preparing_snapshot = 0;
+        cfg_obj->prep_snapshot = 0;
     }
     mm_daemon_config_isp_stream_cfg(cfg_obj, CAM_STREAM_TYPE_SNAPSHOT,
             STOP_STREAM);
     mm_daemon_config_isp_stream_release(cfg_obj, CAM_STREAM_TYPE_POSTVIEW);
     mm_daemon_config_isp_stream_release(cfg_obj, CAM_STREAM_TYPE_SNAPSHOT);
     mm_daemon_config_vfe_stop(cfg_obj);
-    cfg_obj->vfe_started = 0;
 }
 
 static int mm_daemon_config_start_video(mm_daemon_cfg_t *cfg_obj)
@@ -3043,7 +2938,6 @@ static void mm_daemon_config_stop_video(mm_daemon_cfg_t *cfg_obj)
 
     mm_daemon_config_isp_stream_cfg(cfg_obj, stream_type, STOP_STREAM);
     mm_daemon_config_isp_stream_release(cfg_obj, stream_type);
-    cfg_obj->vfe_started = 0;
 }
 
 static int mm_daemon_config_sk_pkt_map(mm_daemon_cfg_t *cfg_obj,
@@ -3130,7 +3024,7 @@ static int mm_daemon_config_sk_pkt_map(mm_daemon_cfg_t *cfg_obj,
             mm_daemon_config_vfe_reset(cfg_obj);
             mm_daemon_config_vfe_module(cfg_obj);
         }
-        mm_daemon_config_set_current_streams(cfg_obj,
+        mm_daemon_config_stream_set(cfg_obj,
                 buf->stream_info->stream_type, 1);
         if (buf->stream_info->stream_type == CAM_STREAM_TYPE_METADATA) {
             buf->output_format = V4L2_PIX_FMT_META;
@@ -3141,7 +3035,6 @@ static int mm_daemon_config_sk_pkt_map(mm_daemon_cfg_t *cfg_obj,
             rc = mm_daemon_config_isp_buf_request(cfg_obj, buf, stream_id);
         }
 
-        cfg_obj->num_streams++;
         break;
     default:
         break;
@@ -3217,7 +3110,7 @@ static int mm_daemon_config_sk_pkt_unmap(mm_daemon_cfg_t *cfg_obj,
                 buf->buf_data[buf_idx].mapped = 0;
                 buf->buf_data[buf_idx].fd = 0;
             }
-            mm_daemon_config_set_current_streams(cfg_obj,
+            mm_daemon_config_stream_set(cfg_obj,
                     buf->stream_info->stream_type, 0);
             if (munmap(buf->stream_info, sizeof(cam_stream_info_t)))
                 ALOGE("%s Failed to unmap memory at %p : %s",
@@ -3228,7 +3121,6 @@ static int mm_daemon_config_sk_pkt_unmap(mm_daemon_cfg_t *cfg_obj,
             buf->fd = 0;
             buf->stream_info_mapped = 0;
         }
-        cfg_obj->num_streams--;
         break;
     default:
         break;
@@ -3239,23 +3131,187 @@ static int mm_daemon_config_sk_pkt_unmap(mm_daemon_cfg_t *cfg_obj,
     return 0;
 }
 
-static void mm_daemon_config_isp_evt_sof(mm_daemon_cfg_t *cfg_obj)
+static void mm_daemon_config_auto_exposure(mm_daemon_cfg_t *cfg_obj,
+        uint32_t buf_idx)
 {
-    //Possibly useless check.  Updates AWB and AEC during VIDEO and PREVIEW.
-    if (cfg_obj->current_streams & DAEMON_STREAM_TYPE_PREVIEW) {
-        if (cfg_obj->wb_changed) {
-            mm_daemon_config_vfe_white_balance(cfg_obj, CAM_STREAM_TYPE_PREVIEW);
-            mm_daemon_config_vfe_update(cfg_obj);
-            cfg_obj->wb_changed = 0;
-        }
-        if (cfg_obj->gain_changed) {
-            if (cfg_obj->info[SNSR_DEV]->state != STATE_STOPPED)
-                mm_daemon_util_subdev_cmd(cfg_obj->info[SNSR_DEV], SENSOR_CMD_EXP_GAIN,
-                        cfg_obj->curr_gain, 0);
-            cfg_obj->gain_changed = 0;
-        }
-        if (!cfg_obj->vfe_started)
-            cfg_obj->vfe_started = 1;
+    int i;
+    int mode;
+    int32_t led_mode;
+    int32_t stat_val = 0;
+    int16_t ae_adj = 0;
+    uint16_t gain = 0;
+    uint16_t gain_min, gain_max;
+    uint16_t threshold = 4000;
+    uint8_t flash_needed = FALSE;
+    uint8_t ae_stable = FALSE;
+    uint8_t frame_wait_count = 4;
+    uint16_t work_buf[256];
+    mm_daemon_stats_buf_info *stat = cfg_obj->stats_buf[MSM_ISP_STATS_AEC];
+
+    if (cfg_obj->info[SNSR_DEV]->state != STATE_POLL ||
+            mm_daemon_config_get_parm(cfg_obj, CAM_INTF_PARM_AEC_LOCK))
+        return;
+
+    if (mm_daemon_config_streaming(cfg_obj, SB(SNAPSHOT)|SB(POSTVIEW)))
+        mode = SNAPSHOT;
+    else
+        mode = PREVIEW;
+
+    gain_max = cfg_obj->sdata->gain_max;
+    gain_min = cfg_obj->sdata->gain_min;
+    led_mode = mm_daemon_config_get_parm(cfg_obj,
+            CAM_INTF_PARM_LED_MODE);
+
+    memcpy(work_buf, stat->buf_data[buf_idx].vaddr, 512);
+    memset(stat->buf_data[buf_idx].vaddr, 0, stat->buf_data[buf_idx].len);
+    for (i = 0; i < 256; i++)
+        stat_val += work_buf[i];
+    stat_val /= i;
+
+    if (cfg_obj->ae.frm_cnt < frame_wait_count) {
+        cfg_obj->ae.frm_cnt++;
+        return;
+    } else
+        cfg_obj->ae.frm_cnt = 0;
+
+    if (stat_val > (threshold - 1000) && stat_val < (threshold + 1000))
+        ae_adj = 0;
+    else
+        ae_adj = (int32_t)(threshold - stat_val) / 100;
+
+    if ((ae_adj > 0 && cfg_obj->ae.curr_gain == gain_max) ||
+            (ae_adj < 0 && cfg_obj->ae.curr_gain == gain_min))
+        ae_adj = 0;
+
+    if (ae_adj == 0) {
+        ae_stable = TRUE;
+        if (led_mode == CAM_FLASH_MODE_AUTO)
+            flash_needed = TRUE;
+    } else {
+        gain = cfg_obj->ae.curr_gain + ae_adj;
+        if (gain > gain_max)
+            gain = gain_max;
+        else if (gain < gain_min)
+            gain = gain_min;
+    }
+
+    if (ae_stable) {
+        if (cfg_obj->prep_snapshot)
+            cfg_obj->ae.meta.is_prep_snapshot_done_valid = TRUE;
+    } else
+        mm_daemon_config_exp_gain(cfg_obj, gain);
+
+    cfg_obj->ae.stable = ae_stable;
+    cfg_obj->ae.flash_needed = flash_needed;
+    cfg_obj->ae.meta.is_ae_params_valid = TRUE;
+}
+
+static void mm_daemon_config_auto_focus_start(mm_daemon_cfg_t *cfg_obj)
+{
+    if (!cfg_obj->info[ACT_DEV])
+        return;
+
+    if (cfg_obj->ae.flash_needed || (mm_daemon_config_get_parm(cfg_obj,
+            CAM_INTF_PARM_LED_MODE) == CAM_FLASH_MODE_ON))
+        mm_daemon_config_prepare_snapshot(cfg_obj);
+
+    if (cfg_obj->af.curr_step_pos != 0) {
+        mm_daemon_util_subdev_cmd(cfg_obj->info[ACT_DEV],
+                ACT_CMD_DEFAULT_FOCUS, 0, 0);
+        memset(&cfg_obj->af, 0, sizeof(struct mm_daemon_af_info));
+    }
+    mm_daemon_config_stats(cfg_obj, BIT(MSM_ISP_STATS_AF), 1);
+}
+
+static void mm_daemon_config_auto_focus_stop(mm_daemon_cfg_t *cfg_obj)
+{
+    mm_daemon_config_stats(cfg_obj, BIT(MSM_ISP_STATS_AF), 0);
+}
+
+static void mm_daemon_config_auto_focus(mm_daemon_cfg_t *cfg_obj,
+        uint32_t buf_idx)
+{
+    struct mm_daemon_act_params *act;
+    uint32_t total_steps;
+    int num_step = 0;
+    int focus_dir = 0;
+    uint16_t curr_stat_val;
+    uint8_t work_buf[3];
+    uint8_t frame_wait_count = 4;
+    mm_daemon_stats_buf_info *stat = cfg_obj->stats_buf[MSM_ISP_STATS_AF];
+
+    if (!cfg_obj->info[ACT_DEV] || (cfg_obj->prep_snapshot &&
+            !mm_daemon_config_get_parm(cfg_obj,
+            CAM_INTF_PARM_AEC_LOCK)) || (cfg_obj->info[ACT_DEV]->state !=
+            STATE_POLL))
+        return;
+
+    if (cfg_obj->af.state != MM_FOCUS_INIT) {
+        if (cfg_obj->af.frm_cnt < frame_wait_count) {
+            cfg_obj->af.frm_cnt++;
+            return;
+        } else
+            cfg_obj->af.frm_cnt = 0;
+    }
+
+    memcpy(work_buf, stat->buf_data[buf_idx].vaddr, 3);
+    memset(stat->buf_data[buf_idx].vaddr, 0, stat->buf_data[buf_idx].len);
+    curr_stat_val = (work_buf[2] << 8) | work_buf[1];
+    if (curr_stat_val > cfg_obj->af.focus_stat_val) {
+        cfg_obj->af.focus_stat_val = curr_stat_val;
+        cfg_obj->af.focus_step_pos = cfg_obj->af.curr_step_pos;
+    }
+
+    act = (struct mm_daemon_act_params *)cfg_obj->sdata->act_params;
+    total_steps = act->act_info->af_tuning_params.total_steps;
+    num_step = cfg_obj->af.focus_step_pos - cfg_obj->af.curr_step_pos;
+    if (num_step > 0)
+        focus_dir = MSM_ACTUATOR_MOVE_SIGNED_NEAR;
+    else if (num_step < 0)
+        focus_dir = MSM_ACTUATOR_MOVE_SIGNED_FAR;
+
+    switch (cfg_obj->af.state) {
+    case MM_FOCUS_INIT:
+        cfg_obj->af.state = MM_FOCUS_SCANNING;
+        cfg_obj->af.incr_step = total_steps / 2;
+        mm_daemon_util_subdev_cmd(cfg_obj->info[ACT_DEV], ACT_CMD_MOVE_FOCUS,
+                cfg_obj->af.incr_step, 0);
+        break;
+    case MM_FOCUS_SCANNING:
+        cfg_obj->af.incr_step /= 2;
+        if (cfg_obj->af.incr_step == 1)
+            cfg_obj->af.state = MM_FOCUS_SCANNING_DONE;
+
+        mm_daemon_util_subdev_cmd(cfg_obj->info[ACT_DEV],
+                ACT_CMD_MOVE_FOCUS, cfg_obj->af.incr_step * focus_dir, 0);
+        break;
+    case MM_FOCUS_SCANNING_DONE:
+        if (cfg_obj->af.curr_step_pos == cfg_obj->af.focus_step_pos) {
+            cfg_obj->af.meta.state = CAM_AF_FOCUSED;
+            mm_daemon_config_auto_focus_stop(cfg_obj);
+        } else
+            mm_daemon_util_subdev_cmd(cfg_obj->info[ACT_DEV],
+                    ACT_CMD_MOVE_FOCUS, cfg_obj->af.focus_step_pos -
+                    cfg_obj->af.curr_step_pos, 0);
+        break;
+    default:
+        break;
+    }
+    cfg_obj->af.meta.is_focus_valid = 1;
+}
+
+static void mm_daemon_config_auto_white_balance(mm_daemon_cfg_t *cfg_obj,
+        uint32_t buf_idx)
+{
+    mm_daemon_stats_buf_info *stat = cfg_obj->stats_buf[MSM_ISP_STATS_AWB];
+
+    memset(stat->buf_data[buf_idx].vaddr, 0, stat->buf_data[buf_idx].len);
+    cam_wb_mode_type wb = mm_daemon_config_get_parm(cfg_obj,
+            CAM_INTF_PARM_WHITE_BALANCE);
+    if (cfg_obj->wb.curr_wb != wb) {
+        mm_daemon_config_vfe_white_balance(cfg_obj);
+        mm_daemon_config_vfe_update(cfg_obj);
+        cfg_obj->wb.curr_wb = wb;
     }
 }
 
@@ -3263,57 +3319,42 @@ static int mm_daemon_config_isp_evt(mm_daemon_cfg_t *cfg_obj,
         struct v4l2_event *isp_event)
 {
     int rc = 0;
+    uint32_t buf_idx;
+    enum msm_isp_stats_type stats_type;
+    struct msm_isp_stats_event *stats_event;
+    struct msm_isp_event_data *event_data =
+            (struct msm_isp_event_data *)&(isp_event->u.data[0]);
 
     switch (isp_event->type) {
-        case ISP_EVENT_SOF: {
-            struct msm_isp_event_data *sof_event;
-            uint32_t buf_idx;
-
-            mm_daemon_config_isp_evt_sof(cfg_obj);
-            sof_event = (struct msm_isp_event_data *)&(isp_event->u.data[0]);
-            buf_idx = mm_daemon_config_metadata_get_buf(cfg_obj);
-            mm_daemon_config_isp_set_metadata(cfg_obj, isp_event, buf_idx);
-            mm_daemon_config_isp_metadata_buf_done(cfg_obj, sof_event, buf_idx);
+        case ISP_EVENT_SOF:
+            cfg_obj->stat_frames = 0;
             break;
-        }
+        case ISP_EVENT_STATS_NOTIFY + MSM_ISP_STATS_AEC:
+        case ISP_EVENT_STATS_NOTIFY + MSM_ISP_STATS_AF:
         case ISP_EVENT_STATS_NOTIFY + MSM_ISP_STATS_AWB:
-        case ISP_EVENT_STATS_NOTIFY + MSM_ISP_STATS_AEC: {
-            enum msm_isp_stats_type stats_type =
-                    isp_event->type - ISP_EVENT_STATS_NOTIFY;
-            struct msm_isp_event_data *buf_event =
-                    (struct msm_isp_event_data *)&(isp_event->u.data[0]);
-            struct msm_isp_stats_event *stats_event = &buf_event->u.stats;
-            uint8_t idx = stats_event->stats_buf_idxs[stats_type];
-            int32_t val = 0;
+            stats_type = isp_event->type - ISP_EVENT_STATS_NOTIFY;
+            stats_event = &event_data->u.stats;
+            buf_idx = stats_event->stats_buf_idxs[stats_type];
             mm_daemon_stats_buf_info *stat = cfg_obj->stats_buf[stats_type];
-            mm_daemon_stats_t *mm_stats;
 
             if (!stat)
                 break;
-            pthread_mutex_lock(&stat->stat_lock);
-            mm_stats = (mm_daemon_stats_t *)stat->mm_stats;
-            if (!mm_stats) {
-                pthread_mutex_unlock(&stat->stat_lock);
-                break;
-            }
-            if (stats_type == MSM_ISP_STATS_AEC)
-                val = cfg_obj->curr_gain;
-            if (mm_stats->state == STATE_POLL) {
-                memcpy(mm_stats->work_buf, stat->buf_data[idx].vaddr,
-                        mm_daemon_stats_size(stats_type));
-                memset(stat->buf_data[idx].vaddr, 0, stat->buf_data[idx].len);
-                mm_daemon_config_stats_cmd(mm_stats, STATS_CMD_PROC, val);
-            }
-            rc = mm_daemon_config_stats_buf_requeue(cfg_obj, stats_type, idx);
-            pthread_mutex_unlock(&stat->stat_lock);
+            cfg_obj->stat_frames |= BIT(stats_type);
+            if (stat->ops.proc)
+                stat->ops.proc(cfg_obj, buf_idx);
+            rc = mm_daemon_config_stats_buf_requeue(cfg_obj, stats_type, buf_idx);
             break;
-        }
         case ISP_EVENT_COMP_STATS_NOTIFY:
             break;
         default:
             ALOGI("%s: Unknown event %d", __FUNCTION__,
                     isp_event->type);
             break;
+    }
+    if (cfg_obj->stat_frames == cfg_obj->enabled_stats) {
+        buf_idx = mm_daemon_config_metadata_get_buf(cfg_obj);
+        mm_daemon_config_isp_set_metadata(cfg_obj, isp_event, buf_idx);
+        mm_daemon_config_isp_metadata_buf_done(cfg_obj, event_data, buf_idx);
     }
     return rc;
 }
@@ -3333,7 +3374,7 @@ static int mm_daemon_config_dequeue(mm_daemon_cfg_t *cfg_obj)
     return mm_daemon_config_isp_evt(cfg_obj, &isp_event);
 }
 
-static int mm_daemon_config_pipe_cmd(mm_daemon_cfg_t *cfg_obj)
+static int mm_daemon_config_read_pipe(mm_daemon_cfg_t *cfg_obj)
 {
     int rc = 0;
     ssize_t read_len;
@@ -3345,143 +3386,143 @@ static int mm_daemon_config_pipe_cmd(mm_daemon_cfg_t *cfg_obj)
     read_len = read(cfg_obj->cfg->pfds[0], &pipe_cmd, sizeof(pipe_cmd));
     stream_id = pipe_cmd.val;
     switch (pipe_cmd.cmd) {
-        case CFG_CMD_STREAM_START:
-            idx = mm_daemon_get_stream_idx(cfg_obj, stream_id);
-            if (idx < 0)
-                return idx;
-            buf = cfg_obj->stream_buf[idx];
-            if (buf->streamon == 0) {
-                stream_type = buf->stream_info->stream_type;
-                switch (stream_type) {
-                    case CAM_STREAM_TYPE_PREVIEW:
-                        if (cfg_obj->info[CSI_DEV])
-                            mm_daemon_util_subdev_cmd(cfg_obj->info[CSI_DEV],
-                                    CSI_CMD_CFG, 0, 0);
-                        mm_daemon_util_subdev_cmd(cfg_obj->info[SNSR_DEV],
-                                SENSOR_CMD_PREVIEW, 0, 1);
-                        rc = mm_daemon_config_start_preview(cfg_obj);
-                        break;
-                    case CAM_STREAM_TYPE_VIDEO:
-                        rc = mm_daemon_config_start_video(cfg_obj);
-                        break;
-                    case CAM_STREAM_TYPE_METADATA:
-                        if (cfg_obj->stats_started)
-                            mm_daemon_config_stats_stop(cfg_obj);
-                        mm_daemon_config_stats_start(cfg_obj);
-                        break;
-                    case CAM_STREAM_TYPE_SNAPSHOT:
-                    case CAM_STREAM_TYPE_POSTVIEW:
-                    case CAM_STREAM_TYPE_OFFLINE_PROC:
-                        if (buf->stream_info->num_bufs)
-                            mm_daemon_config_isp_buf_enqueue(cfg_obj,
-                                    stream_type);
-                        if (stream_type == CAM_STREAM_TYPE_SNAPSHOT) {
-                            mm_daemon_util_subdev_cmd(cfg_obj->info[SNSR_DEV],
-                                    SENSOR_CMD_SNAPSHOT, 0, 1);
-                            rc = mm_daemon_config_start_snapshot(cfg_obj);
-                        }
-                        break;
-                    default:
-                        ALOGE("%s: unknown stream type %d",
-                                __FUNCTION__, stream_type);
-                        rc = -1;
-                        break;
-                }
-                if (rc == 0)
-                    buf->streamon = 1;
-            }
-            break;
-        case CFG_CMD_STREAM_STOP:
-            idx = mm_daemon_get_stream_idx(cfg_obj, stream_id);
-            if (idx < 0)
-                return idx;
-            buf = cfg_obj->stream_buf[idx];
-            if (buf->streamon && buf->stream_info) {
-                stream_type = buf->stream_info->stream_type;
-                switch (stream_type) {
-                    case CAM_STREAM_TYPE_PREVIEW:
-                        mm_daemon_config_stop_preview(cfg_obj);
-                        break;
-                    case CAM_STREAM_TYPE_POSTVIEW:
-                        break;
-                    case CAM_STREAM_TYPE_SNAPSHOT:
-                        mm_daemon_config_stop_snapshot(cfg_obj);
-                        break;
-                    case CAM_STREAM_TYPE_VIDEO:
-                        mm_daemon_config_stop_video(cfg_obj);
-                        break;
-                    case CAM_STREAM_TYPE_METADATA:
-                        if (cfg_obj->stats_started)
-                            mm_daemon_config_stats_stop(cfg_obj);
-                        break;
-                    default:
-                        ALOGE("%s: unknown stream type %d",
-                                __FUNCTION__, stream_type);
-                        break;
-                }
-                buf->streamon = 0;
-            }
-            break;
-        case CFG_CMD_NEW_STREAM:
-            pthread_mutex_lock(&cfg_obj->cfg->lock);
-            for (idx = 0; idx < MAX_NUM_STREAM; idx++) {
-                if (cfg_obj->stream_buf[idx] == NULL)
-                    break;
-            }
-            if (idx == MAX_NUM_STREAM)
-                return -ENOMEM;
-            mm_daemon_util_subdev_cmd(cfg_obj->info[SNSR_DEV],
-                    SENSOR_CMD_POWER_UP, 0, 0);
-            cfg_obj->stream_buf[idx] = (mm_daemon_buf_info *)malloc(
-                    sizeof(mm_daemon_buf_info));
-            memset(cfg_obj->stream_buf[idx], 0, sizeof(mm_daemon_buf_info));
-            cfg_obj->stream_buf[idx]->stream_id = stream_id;
-            pthread_cond_signal(&cfg_obj->cfg->cond);
-            pthread_mutex_unlock(&cfg_obj->cfg->lock);
-            break;
-        case CFG_CMD_DEL_STREAM:
-            idx = mm_daemon_get_stream_idx(cfg_obj, stream_id);
-            if (idx < 0)
-                return idx;
-            if (cfg_obj->stream_buf[idx]) {
-                free(cfg_obj->stream_buf[idx]);
-                cfg_obj->stream_buf[idx] = NULL;
+    case CFG_CMD_STREAM_START:
+        idx = mm_daemon_get_stream_idx(cfg_obj, stream_id);
+        if (idx < 0)
+            return idx;
+        buf = cfg_obj->stream_buf[idx];
+        if (buf->streamon == 0) {
+            stream_type = buf->stream_info->stream_type;
+            switch (stream_type) {
+            case CAM_STREAM_TYPE_PREVIEW:
+                rc = mm_daemon_config_start_preview(cfg_obj);
+                break;
+            case CAM_STREAM_TYPE_VIDEO:
+                rc = mm_daemon_config_start_video(cfg_obj);
+                break;
+            case CAM_STREAM_TYPE_METADATA:
+                if (cfg_obj->enabled_stats)
+                    mm_daemon_config_stats(cfg_obj,
+                            cfg_obj->enabled_stats, false);
+                mm_daemon_config_stats(cfg_obj,
+                        BIT(MSM_ISP_STATS_AEC) |
+                        BIT(MSM_ISP_STATS_AWB), true);
+                break;
+            case CAM_STREAM_TYPE_SNAPSHOT:
+            case CAM_STREAM_TYPE_POSTVIEW:
+            case CAM_STREAM_TYPE_OFFLINE_PROC:
+                if (buf->stream_info->num_bufs)
+                    mm_daemon_config_isp_buf_enqueue(cfg_obj,
+                            stream_type);
+                if (stream_type == CAM_STREAM_TYPE_SNAPSHOT)
+                    rc = mm_daemon_config_start_snapshot(cfg_obj);
+                break;
+            default:
+                ALOGE("%s: unknown stream type %d",
+                        __FUNCTION__, stream_type);
+                rc = -1;
                 break;
             }
-        case CFG_CMD_PARM:
-            if (cfg_obj->parm_buf.mapped)
-                mm_daemon_config_parm(cfg_obj);
+            if (rc == 0)
+                buf->streamon = 1;
+        }
+        break;
+    case CFG_CMD_STREAM_STOP:
+        idx = mm_daemon_get_stream_idx(cfg_obj, stream_id);
+        if (idx < 0)
+            return idx;
+        buf = cfg_obj->stream_buf[idx];
+        if (buf->streamon && buf->stream_info) {
+            stream_type = buf->stream_info->stream_type;
+            switch (stream_type) {
+            case CAM_STREAM_TYPE_PREVIEW:
+                mm_daemon_config_stop_preview(cfg_obj);
+                break;
+            case CAM_STREAM_TYPE_POSTVIEW:
+                break;
+            case CAM_STREAM_TYPE_SNAPSHOT:
+                mm_daemon_config_stop_snapshot(cfg_obj);
+                break;
+            case CAM_STREAM_TYPE_VIDEO:
+                mm_daemon_config_stop_video(cfg_obj);
+                break;
+            case CAM_STREAM_TYPE_METADATA:
+                if (cfg_obj->enabled_stats)
+                    mm_daemon_config_stats(cfg_obj,
+                            cfg_obj->enabled_stats, false);
+                break;
+            default:
+                ALOGE("%s: unknown stream type %d",
+                        __FUNCTION__, stream_type);
+                break;
+            }
+            buf->streamon = 0;
+        }
+        break;
+    case CFG_CMD_NEW_STREAM:
+        pthread_mutex_lock(&cfg_obj->cfg->lock);
+        for (idx = 0; idx < MAX_NUM_STREAM; idx++) {
+            if (cfg_obj->stream_buf[idx] == NULL)
+                break;
+        }
+        if (idx == MAX_NUM_STREAM)
+            return -ENOMEM;
+        mm_daemon_util_subdev_cmd(cfg_obj->info[SNSR_DEV],
+                SENSOR_CMD_POWER_UP, 0, 0);
+        cfg_obj->stream_buf[idx] = (mm_daemon_buf_info *)malloc(
+                sizeof(mm_daemon_buf_info));
+        memset(cfg_obj->stream_buf[idx], 0, sizeof(mm_daemon_buf_info));
+        cfg_obj->stream_buf[idx]->stream_id = stream_id;
+        pthread_cond_signal(&cfg_obj->cfg->cond);
+        pthread_mutex_unlock(&cfg_obj->cfg->lock);
+        break;
+    case CFG_CMD_DEL_STREAM:
+        idx = mm_daemon_get_stream_idx(cfg_obj, stream_id);
+        if (idx < 0)
+            return idx;
+        if (cfg_obj->stream_buf[idx]) {
+            free(cfg_obj->stream_buf[idx]);
+            cfg_obj->stream_buf[idx] = NULL;
             break;
-        case CFG_CMD_PREPARE_SNAPSHOT:
-            if (cfg_obj->info[LED_DEV])
-                mm_daemon_config_prepare_snapshot(cfg_obj);
-            break;
-        case CFG_CMD_MAP_UNMAP_DONE:
-            mm_daemon_util_pipe_cmd(cfg_obj->cfg->cb_pfd,
-                    SERVER_CMD_MAP_UNMAP_DONE, pipe_cmd.val);
-            break;
-        case CFG_CMD_SK_PKT_MAP:
-            rc = mm_daemon_config_sk_pkt_map(cfg_obj,
-                    (struct mm_daemon_sk_pkt *)pipe_cmd.val);
-            mm_daemon_util_pipe_cmd(cfg_obj->cfg->cb_pfd,
-                    SERVER_CMD_MAP_UNMAP_DONE, pipe_cmd.val);
-            break;
-        case CFG_CMD_SK_PKT_UNMAP:
-            rc = mm_daemon_config_sk_pkt_unmap(cfg_obj,
-                    (struct mm_daemon_sk_pkt *)pipe_cmd.val);
-            mm_daemon_util_pipe_cmd(cfg_obj->cfg->cb_pfd,
-                    SERVER_CMD_MAP_UNMAP_DONE, pipe_cmd.val);
-            break;
-        case CFG_CMD_SK_ERR:
-            rc = -1;
-            break;
-        case CFG_CMD_ERR:
-            rc = -1;
-            break;
-        case CFG_CMD_SHUTDOWN:
-            rc = -1;
-        default:
-            break;
+        }
+    case CFG_CMD_PARM:
+        if (cfg_obj->parm_buf.mapped)
+            mm_daemon_config_parm(cfg_obj);
+        break;
+    case CFG_CMD_CANCEL_AUTO_FOCUS:
+        mm_daemon_config_auto_focus_stop(cfg_obj);
+        break;
+    case CFG_CMD_DO_AUTO_FOCUS:
+        mm_daemon_config_auto_focus_start(cfg_obj);
+        break;
+    case CFG_CMD_PREPARE_SNAPSHOT:
+        mm_daemon_config_prepare_snapshot(cfg_obj);
+        break;
+    case CFG_CMD_MAP_UNMAP_DONE:
+        mm_daemon_util_pipe_cmd(cfg_obj->cfg->cb_pfd,
+                SERVER_CMD_MAP_UNMAP_DONE, pipe_cmd.val);
+        break;
+    case CFG_CMD_SK_PKT_MAP:
+        rc = mm_daemon_config_sk_pkt_map(cfg_obj,
+                (struct mm_daemon_sk_pkt *)pipe_cmd.val);
+        mm_daemon_util_pipe_cmd(cfg_obj->cfg->cb_pfd,
+                SERVER_CMD_MAP_UNMAP_DONE, pipe_cmd.val);
+        break;
+    case CFG_CMD_SK_PKT_UNMAP:
+        rc = mm_daemon_config_sk_pkt_unmap(cfg_obj,
+                (struct mm_daemon_sk_pkt *)pipe_cmd.val);
+        mm_daemon_util_pipe_cmd(cfg_obj->cfg->cb_pfd,
+                SERVER_CMD_MAP_UNMAP_DONE, pipe_cmd.val);
+        break;
+    case CFG_CMD_AF_ACT_POS:
+        cfg_obj->af.curr_step_pos = pipe_cmd.val;
+        break;
+    case CFG_CMD_ERR:
+    case CFG_CMD_SHUTDOWN:
+        rc = -1;
+        break;
+    default:
+        break;
     }
     return rc;
 }
@@ -3536,25 +3577,13 @@ static void mm_daemon_config_buf_close(mm_daemon_cfg_t *cfg_obj)
 
 static void mm_daemon_config_thread_stop(mm_daemon_cfg_t *cfg_obj)
 {
-    mm_daemon_thread_state state;
     mm_daemon_thread_info *info = NULL;
     int i;
 
     for (i = 0; i < MAX_DEV; i++) {
         info = cfg_obj->info[i];
-        if (info) {
-            state = info->state;
-            info->state = STATE_STOPPED;
-            if (state == STATE_LOCKED) {
-                pthread_mutex_lock(&info->lock);
-                pthread_cond_signal(&info->cond);
-                pthread_mutex_unlock(&info->lock);
-            }
-            if (info->ops->stop)
-                info->ops->stop(info);
-            else
-                mm_daemon_util_pipe_cmd(info->pfds[1], 0, 0);
-        }
+        if (info && info->ops && info->ops->stop)
+            info->ops->stop(info);
     }
 }
 
@@ -3574,10 +3603,38 @@ static void mm_daemon_config_thread_close(mm_daemon_cfg_t *cfg_obj)
 
 static void mm_daemon_config_stats_init(mm_daemon_cfg_t *cfg_obj)
 {
+    uint16_t stats_enable = cfg_obj->sdata->stats_enable;
     size_t i;
 
-    for (i = 0; i < ARRAY_SIZE(vfe_stats); i++) {
-        mm_daemon_stats_open(cfg_obj, vfe_stats[i]); 
+    for (i = 0; i < MSM_ISP_STATS_MAX; i++) {
+        if (!((stats_enable >> i) & 0x1))
+            continue;
+
+        cfg_obj->stats_buf[i] = (mm_daemon_stats_buf_info *)
+                calloc(1, sizeof(mm_daemon_stats_buf_info));
+
+        if (cfg_obj->stats_buf[i] == NULL)
+            continue;
+
+        switch (i) {
+        case MSM_ISP_STATS_AEC:
+            cfg_obj->stats_buf[i]->ops.start = mm_daemon_config_vfe_stats_aec;
+            cfg_obj->stats_buf[i]->ops.proc = mm_daemon_config_auto_exposure;
+            break;
+        case MSM_ISP_STATS_AF:
+            cfg_obj->stats_buf[i]->ops.start = mm_daemon_config_vfe_stats_af;
+            cfg_obj->stats_buf[i]->ops.proc = mm_daemon_config_auto_focus;
+            break;
+        case MSM_ISP_STATS_AWB:
+            cfg_obj->stats_buf[i]->ops.start = mm_daemon_config_vfe_stats_awb;
+            cfg_obj->stats_buf[i]->ops.proc = mm_daemon_config_auto_white_balance;
+            break;
+        default:
+            break;
+        }
+        stats_enable &= ~BIT(i);
+        if (!stats_enable)
+            break;
     }
     mm_daemon_config_stats_buf_request(cfg_obj);
     mm_daemon_config_stats_buf_alloc(cfg_obj);
@@ -3586,21 +3643,18 @@ static void mm_daemon_config_stats_init(mm_daemon_cfg_t *cfg_obj)
 
 static void mm_daemon_config_stats_deinit(mm_daemon_cfg_t *cfg_obj)
 {
+    uint32_t type;
     size_t i;
-    mm_daemon_stats_t *mm_stats = NULL;
 
     mm_daemon_config_stats_buf_release(cfg_obj);
     mm_daemon_config_stats_buf_dealloc(cfg_obj);
     for (i = 0; i < ARRAY_SIZE(vfe_stats); i++) {
-        if (!cfg_obj->stats_buf[vfe_stats[i]] ||
-                !cfg_obj->stats_buf[vfe_stats[i]]->mm_stats)
-            continue;
-        mm_stats = (mm_daemon_stats_t *)
-                cfg_obj->stats_buf[vfe_stats[i]]->mm_stats;
-        mm_daemon_config_stats_cmd(mm_stats, STATS_CMD_SHUTDOWN, 0);
+        type = vfe_stats[i];
+        if (cfg_obj->stats_buf[type]) {
+            free(cfg_obj->stats_buf[type]);
+            cfg_obj->stats_buf[type] = NULL;
+        }
     }
-    for (i = 0; i < ARRAY_SIZE(vfe_stats); i++)
-        mm_daemon_stats_close(cfg_obj, vfe_stats[i]);
 }
 
 static void *mm_daemon_config_thread(void *data)
@@ -3675,16 +3729,20 @@ static void *mm_daemon_config_thread(void *data)
     }
 
     /* LED */
-    if (sd->led.found) {
+    if (sd->led.found)
         cfg_obj->info[LED_DEV] = mm_daemon_util_thread_open(
                 &sd->led, cam_idx, cfg_obj->cfg->pfds[1]);
-    }
+
+    /* ACT */
+    if (sd->act[cfg_obj->sdata->act_id].found)
+        cfg_obj->info[ACT_DEV] = mm_daemon_util_thread_open(
+                &sd->act[cfg_obj->sdata->act_id], cam_idx,
+                cfg_obj->cfg->pfds[1]);
 
     for (i = 0; i < ARRAY_SIZE(isp_events); i++)
         mm_daemon_config_subscribe(cfg_obj, isp_events[i], 1);
 
-    cfg_obj->curr_gain = DEFAULT_EXP_GAIN;
-    cfg_obj->curr_wb = 90;
+    cfg_obj->ae.curr_gain = DEFAULT_EXP_GAIN;
 
     /* ION */
     cfg_obj->ion_fd = open("/dev/ion", O_RDONLY);
@@ -3692,10 +3750,6 @@ static void *mm_daemon_config_thread(void *data)
     /* STATS */
     if (cfg_obj->sdata->stats_enable)
         mm_daemon_config_stats_init(cfg_obj);
-
-    if (cfg_obj->info[CSI_DEV] && cfg_obj->sdata->csi_params)
-        mm_daemon_util_subdev_cmd(cfg_obj->info[CSI_DEV], CSI_CMD_SET_PARAMS,
-                (uint32_t)cfg_obj->sdata->csi_params, 0);
 
     info->state = STATE_POLL;
     pthread_cond_signal(&cfg_obj->cfg->cond);
@@ -3710,7 +3764,7 @@ static void *mm_daemon_config_thread(void *data)
                 ret = mm_daemon_config_dequeue(cfg_obj);
             else if ((fds[1].revents & POLLIN) &&
                     (fds[1].revents & POLLRDNORM))
-                ret = mm_daemon_config_pipe_cmd(cfg_obj);
+                ret = mm_daemon_config_read_pipe(cfg_obj);
             else
                 usleep(1000);
             if (ret < 0) {
@@ -3732,9 +3786,8 @@ static void *mm_daemon_config_thread(void *data)
 
     mm_daemon_config_buf_close(cfg_obj);
 
-    for (i = 0; i < ARRAY_SIZE(isp_events); i++) {
+    for (i = 0; i < ARRAY_SIZE(isp_events); i++)
         mm_daemon_config_subscribe(cfg_obj, isp_events[i], 0);
-    }    
 
     if (cfg_obj->ion_fd > 0) {
         close(cfg_obj->ion_fd);

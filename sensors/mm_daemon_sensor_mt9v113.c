@@ -1,5 +1,5 @@
 /*
-   Copyright (C) 2016-2017 Brian Stepp 
+   Copyright (C) 2014-2018 Brian Stepp
       steppnasty@gmail.com
 
    This program is free software; you can redistribute it and/or

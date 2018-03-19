@@ -1,5 +1,5 @@
 /*
-   Copyright (C) 2017 Brian Stepp 
+   Copyright (C) 2014-2018 Brian Stepp
       steppnasty@gmail.com
 
    This program is free software; you can redistribute it and/or
@@ -28,7 +28,6 @@
 typedef enum {
     CSI_CMD_SHUTDOWN,
     CSI_CMD_CFG,
-    CSI_CMD_SET_PARAMS,
 } mm_daemon_csi_cmd_t;
 
 typedef enum {

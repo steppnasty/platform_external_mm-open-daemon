@@ -5,12 +5,12 @@ ifeq ($(TARGET_USE_MM_OPEN_DAEMON),true)
 
   MMDAEMON_FILES:=		\
 	mm_daemon.c		\
+	mm_daemon_actuator.c	\
 	mm_daemon_config.c	\
 	mm_daemon_csi.c		\
 	mm_daemon_led.c		\
 	mm_daemon_sensor.c	\
 	mm_daemon_sock.c	\
-	mm_daemon_stats.c	\
 	mm_daemon_util.c
 
   LOCAL_SRC_FILES := $(MMDAEMON_FILES)

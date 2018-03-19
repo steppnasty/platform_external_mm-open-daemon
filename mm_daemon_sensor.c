@@ -1,5 +1,5 @@
 /*
-   Copyright (C) 2014-2017 Brian Stepp 
+   Copyright (C) 2014-2018 Brian Stepp
       steppnasty@gmail.com
 
    This program is free software; you can redistribute it and/or
@@ -108,7 +108,6 @@ static int mm_daemon_sensor_stop(mm_daemon_sensor_t *mm_snsr)
         mm_snsr->cfg->ops->deinit(mm_snsr->cfg);
     rc = ioctl(mm_snsr->cam_fd, VIDIOC_MSM_SENSOR_RELEASE, NULL);
     mm_snsr->sensor_state = SENSOR_POWER_OFF;
-    close(mm_snsr->cam_fd);
     return rc;
 }
 
@@ -140,7 +139,7 @@ static int mm_daemon_sensor_i2c_read(void *snsr,
         .data = data,
         .data_type = data_type,
     };
-        
+
     return mm_daemon_sensor_cmd(mm_snsr, CFG_SLAVE_READ_I2C, (void *)&read_config);
 }
 
@@ -181,73 +180,91 @@ static int mm_daemon_sensor_execute_cmd(mm_daemon_thread_info *info,
     int rc = 0;
 
     switch (cmd) {
-        case SENSOR_CMD_PREVIEW:
-            pthread_mutex_lock(&info->lock);
-            if ((rc = mm_snsr->cfg->ops->prev(mm_snsr->cfg)) < 0)
-                ALOGE("%s: Error while setting preview mode", __FUNCTION__);
-            pthread_cond_signal(&info->cond);
-            pthread_mutex_unlock(&info->lock);
-            break;
-        case SENSOR_CMD_SNAPSHOT:
-            pthread_mutex_lock(&info->lock);
-            if ((rc = mm_snsr->cfg->ops->snap(mm_snsr->cfg)) < 0)
-                ALOGE("%s: Error while setting snapshot mode", __FUNCTION__);
-            pthread_cond_signal(&info->cond);
-            pthread_mutex_unlock(&info->lock);
-            break;
-        case SENSOR_CMD_GAIN_UPDATE:
-            mm_snsr->cfg->curr_gain = val;
-            break;
-        case SENSOR_CMD_EXP_GAIN:
-            if (mm_snsr->cfg->ops->exp_gain)
-                mm_snsr->cfg->ops->exp_gain(mm_snsr->cfg, val);
-            break;
-        case SENSOR_CMD_AB:
-            if (mm_snsr->cfg->ops->ab)
-                mm_snsr->cfg->ops->ab(mm_snsr->cfg, val);
-            break;
-        case SENSOR_CMD_WB:
-            if (mm_snsr->cfg->ops->wb)
-                if (mm_snsr->cfg->ops->wb(mm_snsr->cfg, val) < 0)
-                    ALOGW("sensor does not support wb setting %d", val);
-            break;
-        case SENSOR_CMD_BRIGHTNESS:
-            if (mm_snsr->cfg->ops->brightness)
-                mm_snsr->cfg->ops->brightness(mm_snsr->cfg, val);
-            break;
-        case SENSOR_CMD_SATURATION:
-            if (mm_snsr->cfg->ops->saturation)
-                mm_snsr->cfg->ops->saturation(mm_snsr->cfg, val);
-            break;
-        case SENSOR_CMD_CONTRAST:
-            if (mm_snsr->cfg->ops->contrast)
-                mm_snsr->cfg->ops->contrast(mm_snsr->cfg, val);
-            break;
-        case SENSOR_CMD_EFFECT:
-            if (mm_snsr->cfg->ops->effect)
-                mm_snsr->cfg->ops->effect(mm_snsr->cfg, val);
-            break;
-        case SENSOR_CMD_SHARPNESS:
-            if (mm_snsr->cfg->ops->sharpness)
-                mm_snsr->cfg->ops->sharpness(mm_snsr->cfg, val);
-            break;
-        case SENSOR_CMD_POWER_UP:
-            if (mm_snsr->sensor_state == SENSOR_POWER_OFF)
-                mm_daemon_sensor_power_up(info, mm_snsr);
-            break;
-        case SENSOR_CMD_SHUTDOWN:
-            rc = -1;
-            break;
-        default:
-            ALOGE("%s: Unknown cmd %d", __FUNCTION__, cmd);
+    case SENSOR_CMD_PREVIEW:
+        pthread_mutex_lock(&info->lock);
+        if ((rc = mm_snsr->cfg->ops->prev(mm_snsr->cfg)) < 0)
+            ALOGE("%s: Error while setting preview mode", __FUNCTION__);
+        pthread_cond_signal(&info->cond);
+        pthread_mutex_unlock(&info->lock);
+        break;
+    case SENSOR_CMD_SNAPSHOT:
+        pthread_mutex_lock(&info->lock);
+        if ((rc = mm_snsr->cfg->ops->snap(mm_snsr->cfg)) < 0)
+            ALOGE("%s: Error while setting snapshot mode", __FUNCTION__);
+        pthread_cond_signal(&info->cond);
+        pthread_mutex_unlock(&info->lock);
+        break;
+    case SENSOR_CMD_GAIN_UPDATE:
+        mm_snsr->cfg->curr_gain = val;
+        break;
+    case SENSOR_CMD_EXP_GAIN:
+        ALOGI("aospSX[%s:%d] EXP_GAIN %d", __FUNCTION__, __LINE__, val);
+        if (mm_snsr->cfg->ops->exp_gain)
+            rc = mm_snsr->cfg->ops->exp_gain(mm_snsr->cfg, val);
+        break;
+    case SENSOR_CMD_AB:
+        if (mm_snsr->cfg->ops->ab)
+            mm_snsr->cfg->ops->ab(mm_snsr->cfg, val);
+        break;
+    case SENSOR_CMD_WB:
+        if (mm_snsr->cfg->ops->wb)
+            mm_snsr->cfg->ops->wb(mm_snsr->cfg, val);
+        break;
+    case SENSOR_CMD_BRIGHTNESS:
+        if (mm_snsr->cfg->ops->brightness)
+            mm_snsr->cfg->ops->brightness(mm_snsr->cfg, val);
+        break;
+    case SENSOR_CMD_SATURATION:
+        if (mm_snsr->cfg->ops->saturation)
+            mm_snsr->cfg->ops->saturation(mm_snsr->cfg, val);
+        break;
+    case SENSOR_CMD_CONTRAST:
+        if (mm_snsr->cfg->ops->contrast)
+            mm_snsr->cfg->ops->contrast(mm_snsr->cfg, val);
+        break;
+    case SENSOR_CMD_EFFECT:
+        if (mm_snsr->cfg->ops->effect)
+            mm_snsr->cfg->ops->effect(mm_snsr->cfg, val);
+        break;
+    case SENSOR_CMD_SHARPNESS:
+        if (mm_snsr->cfg->ops->sharpness)
+            mm_snsr->cfg->ops->sharpness(mm_snsr->cfg, val);
+        break;
+    case SENSOR_CMD_POWER_UP:
+        if (mm_snsr->sensor_state == SENSOR_POWER_OFF)
+            mm_daemon_sensor_power_up(info, mm_snsr);
+        break;
+    case SENSOR_CMD_SHUTDOWN:
+        rc = -1;
+        break;
+    default:
+        ALOGE("%s: Unknown cmd %d", __FUNCTION__, cmd);
     }
     return rc;
 }
 
-static int mm_daemon_sensor_read_pipe(mm_daemon_thread_info *info,
-        mm_daemon_sensor_t *mm_snsr)
+static void mm_daemon_sensor_shutdown(mm_daemon_thread_info *info)
+{
+    mm_daemon_sensor_t *mm_snsr = (mm_daemon_sensor_t *)info->obj;
+
+    if (mm_snsr) {
+        mm_daemon_sensor_stop(mm_snsr);
+        mm_daemon_sensor_empty_queue(info, mm_snsr, 0);
+        if (mm_snsr->cam_fd)
+            close(mm_snsr->cam_fd);
+        if (head) {
+            free(head);
+            head = NULL;
+        }
+        free(info->obj);
+        info->obj = NULL;
+    }
+}
+
+static int mm_daemon_sensor_read_cmd(mm_daemon_thread_info *info)
 {
     ssize_t read_len;
+    mm_daemon_sensor_t *mm_snsr = (mm_daemon_sensor_t *)info->obj;
     mm_daemon_pipe_evt_t pipe_cmd;
 
     read_len = read(info->pfds[0], &pipe_cmd, sizeof(pipe_cmd));
@@ -309,13 +326,13 @@ error:
     return -1;
 }
 
-static mm_daemon_sensor_t *mm_daemon_sensor_init(mm_daemon_thread_info *info)
+static int mm_daemon_sensor_init(mm_daemon_thread_info *info)
 {
     mm_daemon_sensor_t *mm_snsr = NULL;
 
     mm_snsr = (mm_daemon_sensor_t *)calloc(1, sizeof(mm_daemon_sensor_t));
-    if (mm_snsr == NULL)
-        return NULL;
+    if (!mm_snsr)
+        return -EINVAL;
 
     mm_snsr->cam_fd = open(info->devpath, O_RDWR | O_NONBLOCK);
     if (mm_snsr->cam_fd < 0)
@@ -330,74 +347,39 @@ static mm_daemon_sensor_t *mm_daemon_sensor_init(mm_daemon_thread_info *info)
 
     if (mm_daemon_sensor_start(mm_snsr) < 0) {
         mm_daemon_sensor_stop(mm_snsr);
-        goto init_error;
+        goto start_error;
     }
-    return mm_snsr;
+    info->obj = (void *)mm_snsr;
+    return 0;
+start_error:
+    if (head) {
+        free(head);
+        head = NULL;
+    }
 init_error:
     if (mm_snsr->cam_fd)
         close(mm_snsr->cam_fd);
 cam_error:
     if (mm_snsr)
         free(mm_snsr);
-    return NULL;
+    return -EINVAL;
 }
 
-static void *mm_daemon_sensor_thread(void *data)
-{
-    struct pollfd pfd;
-    mm_daemon_thread_info *info = (mm_daemon_thread_info *)data;
-    mm_daemon_sensor_t *mm_snsr = NULL;
-
-    mm_snsr = mm_daemon_sensor_init(info);
-    if (mm_snsr == NULL) {
-        mm_daemon_util_pipe_cmd(info->cb_pfd, CFG_CMD_ERR, info->type);
-        goto error;
-    }
-
-    pfd.fd = info->pfds[0];
-    do {
-        pfd.events = POLLIN|POLLRDNORM;
-        if (mm_daemon_util_set_thread_state(info, STATE_POLL) < 0)
-            break;
-        if (poll(&pfd, 1, -1) > 0) {
-            if (mm_daemon_util_set_thread_state(info, STATE_BUSY) < 0)
-                break;
-            if ((pfd.revents & POLLIN) &&
-                    (pfd.revents & POLLRDNORM)) {
-                if ((mm_daemon_sensor_read_pipe(info, mm_snsr)) < 0)
-                    break;
-            } else
-                usleep(1000);
-        } else {
-            usleep(100);
-            continue;
-        }
-    } while (mm_daemon_util_set_thread_state(info, 0) == 0);
-    mm_daemon_sensor_stop(mm_snsr);
-    mm_daemon_sensor_empty_queue(info, mm_snsr, 0);
-error:
-    if (head) {
-        free(head);
-        head = NULL;
-    }
-    if (mm_snsr)
-        free(mm_snsr);
-    mm_daemon_util_set_thread_state(info, STATE_STOPPED);
-    return NULL;
-}
-
-static struct mm_daemon_thread_ops mm_daemon_sensor_ops = {
-    .thread = mm_daemon_sensor_thread,
+static struct mm_daemon_thread_ops mm_daemon_snsr_thread_ops = {
+    .init = mm_daemon_sensor_init,
+    .shutdown = mm_daemon_sensor_shutdown,
+    .cmd = mm_daemon_sensor_read_cmd,
 };
 
-void mm_daemon_sensor_load(mm_daemon_sd_info *snsr, mm_daemon_sd_info *camif)
+void mm_daemon_snsr_load(mm_daemon_sd_info *sd, mm_daemon_sd_info *camif,
+        mm_daemon_sd_info *act)
 {
     mm_sensor_cfg_t *cfg = NULL;
     struct sensorb_cfg_data cdata;
     char path[PATH_MAX];
     int fd;
 
-    fd = open(snsr->devpath, O_RDWR | O_NONBLOCK);
+    fd = open(sd->devpath, O_RDWR | O_NONBLOCK);
     if (fd < 0)
         return;
 
@@ -411,19 +393,20 @@ void mm_daemon_sensor_load(mm_daemon_sd_info *snsr, mm_daemon_sd_info *camif)
 
     snprintf(path, PATH_MAX, "/system/lib/libmmdaemon_%s.so",
             cdata.cfg.sensor_info.sensor_name);
-    snsr->handle = dlopen(path, RTLD_NOW);
-    if (snsr->handle == NULL) {
+    sd->handle = dlopen(path, RTLD_NOW);
+    if (sd->handle == NULL) {
         char const *err_str = dlerror();
         ALOGE("Error loading %s: %s", path, err_str?err_str:"unknown");
         return;
     }
     ALOGI("Successfully loaded %s sensor", cdata.cfg.sensor_info.sensor_name);
-    cfg = (mm_sensor_cfg_t *)dlsym(snsr->handle, "sensor_cfg_obj");
+    cfg = (mm_sensor_cfg_t *)dlsym(sd->handle, "sensor_cfg_obj");
     if (!cfg) {
-        dlclose(snsr->handle);
+        dlclose(sd->handle);
         return;
     }
-    snsr->data = (void *)cfg;
-    snsr->ops = (void *)&mm_daemon_sensor_ops;
+    sd->data = (void *)cfg;
+    sd->ops = (void *)&mm_daemon_snsr_thread_ops;
     camif->data = cfg->data->csi_params;
+    act->data = cfg->data->act_params;
 }

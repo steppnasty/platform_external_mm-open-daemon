@@ -1,5 +1,5 @@
 /*
-   Copyright (C) 2018 Brian Stepp 
+   Copyright (C) 2014-2018 Brian Stepp
       steppnasty@gmail.com
 
    This program is free software; you can redistribute it and/or
@@ -49,23 +49,25 @@ static int mm_daemon_led_control(mm_daemon_led_t *mm_led,
     return ioctl(mm_led->fd, VIDIOC_MSM_FLASH_LED_DATA_CFG, &cdata);
 }
 
-static int mm_daemon_led_shutdown(mm_daemon_led_t *mm_led)
+static void mm_daemon_led_shutdown(mm_daemon_thread_info *info)
 {
-    int rc = 0;
+    mm_daemon_led_t *mm_led = (mm_daemon_led_t *)info->obj;
 
-    if (mm_led->fd) {
-        rc = mm_daemon_led_control(mm_led, MSM_CAMERA_LED_RELEASE);
-        close(mm_led->fd);
+    if (mm_led) {
+        if (mm_led->fd) {
+            mm_daemon_led_control(mm_led, MSM_CAMERA_LED_RELEASE);
+            close(mm_led->fd);
+        }
+        free(info->obj);
+        info->obj = NULL;
     }
-
-    return rc;
 }
 
-static int mm_daemon_led_read_pipe(mm_daemon_thread_info *info,
-        mm_daemon_led_t *mm_led)
+static int mm_daemon_led_cmd(mm_daemon_thread_info *info)
 {
     int rc = 0;
     ssize_t read_len;
+    mm_daemon_led_t *mm_led = (mm_daemon_led_t *)info->obj;
     mm_daemon_pipe_evt_t pipe_cmd;
 
     read_len = read(info->pfds[0], &pipe_cmd, sizeof(pipe_cmd));
@@ -79,22 +81,24 @@ static int mm_daemon_led_read_pipe(mm_daemon_thread_info *info,
     default:
         break;
     }
-   
+
     return rc;
 }
 
-static mm_daemon_led_t *mm_daemon_led_init(mm_daemon_thread_info *info)
+static int mm_daemon_led_init(mm_daemon_thread_info *info)
 {
     mm_daemon_led_t *mm_led = NULL;
 
     mm_led = (mm_daemon_led_t *)calloc(1, sizeof(mm_daemon_led_t));
     if (!mm_led)
-        return NULL;
+        return -EINVAL;
 
     mm_led->fd = open(info->devpath, O_RDWR | O_NONBLOCK);
     if (mm_led->fd > 0) {
-        if (mm_daemon_led_control(mm_led, MSM_CAMERA_LED_INIT) == 0)
-            return mm_led;
+        if (mm_daemon_led_control(mm_led, MSM_CAMERA_LED_INIT) == 0) {
+            info->obj = (void *)mm_led;
+            return 0;
+        }
     }
 
     if (mm_led->fd)
@@ -102,51 +106,13 @@ static mm_daemon_led_t *mm_daemon_led_init(mm_daemon_thread_info *info)
     if (mm_led)
         free(mm_led);
 
-    return NULL;
-}
-
-static void *mm_daemon_led_thread(void *data)
-{
-    mm_daemon_thread_info *info = (mm_daemon_thread_info *)data;
-    mm_daemon_led_t *mm_led = NULL;
-    struct pollfd pfd;
-
-    mm_led = mm_daemon_led_init(info);
-    if (!mm_led) {
-        mm_daemon_util_pipe_cmd(info->cb_pfd, CFG_CMD_LED_ERR, info->type);
-        goto error;
-    }
-
-    pfd.fd = info->pfds[0];
-    do {
-        pfd.events = POLLIN|POLLRDNORM;
-        if (mm_daemon_util_set_thread_state(info, STATE_POLL) < 0)
-            break;
-        if (poll(&pfd, 1, -1) > 0) {
-            if (mm_daemon_util_set_thread_state(info, STATE_BUSY) < 0)
-                break;
-            if ((pfd.revents & POLLIN) &&
-                    (pfd.revents & POLLRDNORM)) {
-                if ((mm_daemon_led_read_pipe(info, mm_led)) < 0) {
-                    break;
-                }
-            } else
-                usleep(1000);
-        } else {
-            usleep(100);
-            continue;
-        }
-    } while (mm_daemon_util_set_thread_state(info, 0) == 0);
-    mm_daemon_led_shutdown(mm_led);
-error:
-    if (mm_led)
-        free(mm_led);
-    mm_daemon_util_set_thread_state(info, STATE_STOPPED);
-    return NULL;
+    return -EINVAL;
 }
 
 static struct mm_daemon_thread_ops mm_daemon_led_thread_ops = {
-    .thread = mm_daemon_led_thread,
+    .init = mm_daemon_led_init,
+    .shutdown = mm_daemon_led_shutdown,
+    .cmd = mm_daemon_led_cmd,
 };
 
 void mm_daemon_led_load(mm_daemon_sd_info *sd)

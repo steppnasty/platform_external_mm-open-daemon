@@ -1,5 +1,5 @@
 /*
-   Copyright (C) 2014-2018 Brian Stepp
+   Copyright (C) 2014-2018 Brian Stepp 
       steppnasty@gmail.com
 
    This program is free software; you can redistribute it and/or
@@ -20,16 +20,21 @@
    The GNU General Public License is contained in the file COPYING.
 */
 
+#ifndef MM_DAEMON_ACT_H
+#define MM_DAEMON_ACT_H
+
 #include "mm_daemon.h"
 
-struct mm_daemon_sk_pkt {
-    uint8_t cam_idx;
-    int fd;
-    void *data;
-};
+typedef enum {
+    ACT_CMD_SHUTDOWN,
+    ACT_CMD_MOVE_FOCUS,
+    ACT_CMD_DEFAULT_FOCUS,
+} mm_daemon_act_cmd_t;
 
-typedef struct mm_daemon_socket {
-    int dev_fd;
-    int dev_id;
-    struct sockaddr_un sock_addr;
-} mm_daemon_socket_t;
+typedef struct mm_daemon_act {
+    struct mm_daemon_act_params *params;
+    int fd;
+    int16_t curr_step_pos;
+} mm_daemon_act_t;
+
+#endif

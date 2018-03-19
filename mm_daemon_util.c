@@ -1,5 +1,5 @@
 /*
-   Copyright (C) 2018 Brian Stepp 
+   Copyright (C) 2014-2018 Brian Stepp
       steppnasty@gmail.com
 
    This program is free software; you can redistribute it and/or
@@ -23,6 +23,52 @@
 #include "mm_daemon_util.h"
 
 
+static void *mm_daemon_util_thread_poll_start(void *data)
+{
+    mm_daemon_thread_info *info = (mm_daemon_thread_info *)data;
+    struct pollfd pfd;
+
+    if (info->ops->init(info) < 0) {
+        mm_daemon_util_pipe_cmd(info->cb_pfd, CFG_CMD_ERR, info->type);
+        goto error;
+    }
+
+    pfd.fd = info->pfds[0];
+    do {
+        pfd.events = POLLIN|POLLRDNORM;
+        if (mm_daemon_util_set_thread_state(info, STATE_POLL) < 0)
+            break;
+        if (poll(&pfd, 1, -1) > 0) {
+            if (mm_daemon_util_set_thread_state(info, STATE_BUSY) < 0)
+                break;
+            if ((pfd.revents & POLLIN) &&
+                    (pfd.revents & POLLRDNORM)) {
+                if (info->ops->cmd(info) < 0)
+                    break;
+            } else
+                usleep(1000);
+        } else {
+            usleep(100);
+            continue;
+        }
+    } while (mm_daemon_util_set_thread_state(info, 0) == 0);
+    if (info->ops->shutdown)
+        info->ops->shutdown(info);
+error:
+    mm_daemon_util_set_thread_state(info, STATE_STOPPED);
+    return NULL;
+}
+
+static void mm_daemon_util_thread_poll_stop(mm_daemon_thread_info *info)
+{
+    if (info->state == STATE_LOCKED) {
+        pthread_mutex_lock(&info->lock);
+        pthread_cond_signal(&info->cond);
+        pthread_mutex_unlock(&info->lock);
+    }
+    mm_daemon_util_pipe_cmd(info->pfds[1], 0, 0);
+}
+
 mm_daemon_thread_info *mm_daemon_util_thread_open(mm_daemon_sd_info *sd,
         uint8_t cam_idx, int32_t cb_pfd)
 {
@@ -38,19 +84,28 @@ mm_daemon_thread_info *mm_daemon_util_thread_open(mm_daemon_sd_info *sd,
         free(info);
         return NULL;
     }
+    if (ops->start == NULL) {
+        if (ops->init == NULL || ops->shutdown == NULL) {
+            free(info);
+            return NULL;
+        }
+        ops->start = mm_daemon_util_thread_poll_start;
+    }
+    if (ops->stop == NULL)
+        ops->stop = mm_daemon_util_thread_poll_stop;
     mm_daemon_util_set_thread_state(info, STATE_INIT);
     info->devpath = sd->devpath;
     info->sid = cam_idx;
     info->type = sd->type;
     info->cb_pfd = cb_pfd;
     info->data = sd->data;
-    info->ops = (struct mm_daemon_thread_ops *)sd->ops;
+    info->ops = ops;
     pthread_mutex_init(&(info->lock), NULL);
     pthread_cond_init(&(info->cond), NULL);
     pthread_attr_t attr;
     pthread_attr_init(&attr);
     pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE);
-    pthread_create(&info->pid, &attr, ops->thread, (void *)info);
+    pthread_create(&info->pid, &attr, ops->start, (void *)info);
     pthread_attr_destroy(&attr);
     return info;
 }
