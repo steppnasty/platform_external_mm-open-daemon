@@ -401,7 +401,7 @@ static cam_capability_t s5k4e1gx_capabilities = {
         CAM_WB_MODE_DAYLIGHT,
     },
 
-    .supported_focus_modes_cnt = 3,
+    .supported_focus_modes_cnt = 2,
     .supported_focus_modes = {
         CAM_FOCUS_MODE_AUTO,
         CAM_FOCUS_MODE_INFINITY,

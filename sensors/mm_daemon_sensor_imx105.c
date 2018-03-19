@@ -368,11 +368,10 @@ static cam_capability_t imx105_capabilities = {
         CAM_WB_MODE_DAYLIGHT,
     },
 
-    .supported_focus_modes_cnt = 3,
+    .supported_focus_modes_cnt = 2,
     .supported_focus_modes = {
         CAM_FOCUS_MODE_AUTO,
         CAM_FOCUS_MODE_INFINITY,
-        CAM_FOCUS_MODE_MACRO,
     },
 
     //TODO: get this from sensor_init_params

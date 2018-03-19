@@ -198,7 +198,6 @@ static int mm_daemon_sensor_execute_cmd(mm_daemon_thread_info *info,
         mm_snsr->cfg->curr_gain = val;
         break;
     case SENSOR_CMD_EXP_GAIN:
-        ALOGI("aospSX[%s:%d] EXP_GAIN %d", __FUNCTION__, __LINE__, val);
         if (mm_snsr->cfg->ops->exp_gain)
             rc = mm_snsr->cfg->ops->exp_gain(mm_snsr->cfg, val);
         break;
