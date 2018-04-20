@@ -165,19 +165,25 @@ static int s5k4e1gx_exp_gain(mm_sensor_cfg_t *cfg, uint16_t gain)
     uint8_t min_legal_gain = 0x20;
     uint16_t max_legal_gain = 0x200;
     uint16_t min_line;
+    uint16_t max_line;
     uint32_t line;
     uint32_t ll_ratio;
     uint32_t fl_lines;
     uint32_t ll_pck = 2738;
     uint32_t offset = 12;
 
-    line = cfg->data->attr[pdata->mode]->h;
-    fl_lines = line + cfg->data->attr[pdata->mode]->blk_l;
+    max_line = cfg->data->attr[pdata->mode]->h;
+    fl_lines = max_line + cfg->data->attr[pdata->mode]->blk_l;
 
-    if (pdata->mode == PREVIEW && gain == 0x20)
-        line = 0x31F;
-    else if (pdata->mode == PREVIEW && gain <= 0x34)
-        line = 0x1E7;
+    if (gain < 0x30 && pdata->line > 0x40) {
+        line = (pdata->line/2);
+    } else if ((gain > 0xa0) && (pdata->line < max_line)) {
+        if ((pdata->line * 2) > max_line)
+            line = cfg->data->attr[pdata->mode]->h;
+        else
+            line = pdata->line * 2;
+    } else
+        line = pdata->line;
 
     if (gain > max_legal_gain)
         gain = max_legal_gain;
@@ -318,6 +324,7 @@ static int s5k4e1gx_preview(mm_sensor_cfg_t *cfg)
             &s5k4e1gx_prev_settings[0],
             ARRAY_SIZE(s5k4e1gx_prev_settings), dt);
     s5k4e1gx_stream_start(cfg);
+    pdata->line = 980;
     return rc;
 }
 
@@ -333,6 +340,7 @@ static int s5k4e1gx_snapshot(mm_sensor_cfg_t *cfg)
             &s5k4e1gx_snap_settings[0],
             ARRAY_SIZE(s5k4e1gx_snap_settings), dt);
     s5k4e1gx_stream_start(cfg);
+    pdata->line = 1960;
     return rc;
 }
 
@@ -431,7 +439,7 @@ static cam_capability_t s5k4e1gx_capabilities = {
     .video_sizes_tbl_cnt = 5,
     .video_sizes_tbl = {
         {1280, 720},
-        {800, 480}:
+        {800, 480},
         {720, 480},
         {640, 480},
         {176, 144},
