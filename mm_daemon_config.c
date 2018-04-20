@@ -3144,7 +3144,7 @@ static void mm_daemon_config_auto_exposure(mm_daemon_cfg_t *cfg_obj,
     uint16_t threshold = 4000;
     uint8_t flash_needed = FALSE;
     uint8_t ae_stable = FALSE;
-    uint8_t frame_wait_count = 4;
+    uint8_t frame_wait_count = 10;
     uint16_t work_buf[256];
     mm_daemon_stats_buf_info *stat = cfg_obj->stats_buf[MSM_ISP_STATS_AEC];
 
@@ -3188,11 +3188,12 @@ static void mm_daemon_config_auto_exposure(mm_daemon_cfg_t *cfg_obj,
         if (led_mode == CAM_FLASH_MODE_AUTO)
             flash_needed = TRUE;
     } else {
-        gain = cfg_obj->ae.curr_gain + ae_adj;
-        if (gain > gain_max)
-            gain = gain_max;
-        else if (gain < gain_min)
+        if (cfg_obj->ae.curr_gain + ae_adj < gain_min)
             gain = gain_min;
+        else if (cfg_obj->ae.curr_gain + ae_adj > gain_max)
+            gain = gain_max;
+        else
+            gain = cfg_obj->ae.curr_gain + ae_adj;
     }
 
     if (ae_stable) {
