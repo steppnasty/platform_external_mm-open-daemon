@@ -109,7 +109,7 @@ enum mm_daemon_thread_type {
     ACT_DEV,
     BUF_DEV,
     MAX_DEV,
-};   
+};
 
 typedef struct {
     char devpath[32];

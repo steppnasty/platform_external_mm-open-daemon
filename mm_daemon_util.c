@@ -22,7 +22,6 @@
 
 #include "mm_daemon_util.h"
 
-
 static void *mm_daemon_util_thread_poll_start(void *data)
 {
     mm_daemon_thread_info *info = (mm_daemon_thread_info *)data;
@@ -114,6 +113,8 @@ int mm_daemon_util_thread_close(mm_daemon_thread_info *info)
 {
     void *rc;
 
+    if ((info->state == STATE_POLL) && info->ops->stop)
+        info->ops->stop(info);
     pthread_join(info->pid, &rc);
     pthread_mutex_destroy(&(info->lock));
     pthread_cond_destroy(&(info->cond));

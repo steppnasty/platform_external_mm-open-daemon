@@ -1617,15 +1617,9 @@ static int mm_daemon_config_vfe_s2cbcr(mm_daemon_cfg_t *cfg_obj,
     p = s2cbcr_cfg;
     *p++ = 0x00000003;
     *p++ = s2cbcr_width;
-    if (stream_type == CAM_STREAM_TYPE_SNAPSHOT) {
-        *p++ = 0x0;
-        *p++ = s2cbcr_height;
-        *p = 0x0;
-    } else {
-        *p++ = 0x0;
-        *p++ = s2cbcr_height;
-        *p = 0x0;
-    }
+    *p++ = 0x0;
+    *p++ = s2cbcr_height;
+    *p = 0x0;
 
     rc = mm_daemon_config_vfe_reg_cmd(cfg_obj, 20, (void *)s2cbcr_cfg,
             (void *)&reg_cfg_cmd, ARRAY_SIZE(reg_cfg_cmd));
@@ -3348,8 +3342,7 @@ static int mm_daemon_config_isp_evt(mm_daemon_cfg_t *cfg_obj,
         case ISP_EVENT_COMP_STATS_NOTIFY:
             break;
         default:
-            ALOGI("%s: Unknown event %d", __FUNCTION__,
-                    isp_event->type);
+            ALOGE("%s: Unknown event %d", __FUNCTION__, isp_event->type);
             break;
     }
     if (cfg_obj->stat_frames == cfg_obj->enabled_stats) {
@@ -3680,24 +3673,6 @@ static void *mm_daemon_config_thread(void *data)
         goto cfg_close;
     cfg_obj->sdata = s_cfg->data;
 
-    /* VFE */
-    cfg_obj->vfe_fd = open(sd->vfe_sd.devpath, O_RDWR | O_NONBLOCK);
-    if (cfg_obj->vfe_fd <= 0) {
-        ALOGE("%s: failed to open VFE device at %s", __FUNCTION__, sd->vfe_sd.devpath);
-        pthread_cond_signal(&cfg_obj->cfg->cond);
-        pthread_mutex_unlock(&cfg_obj->cfg->lock);
-        goto cfg_close;
-    }
-
-    /* BUF */
-    cfg_obj->buf_fd = open(sd->buf.devpath, O_RDWR | O_NONBLOCK);
-    if (cfg_obj->buf_fd <= 0) {
-        ALOGE("%s: failed to open genbuf device", __FUNCTION__);
-        pthread_cond_signal(&cfg_obj->cfg->cond);
-        pthread_mutex_unlock(&cfg_obj->cfg->lock);
-        goto vfe_close;
-    }
-
     /* SOCK */
     cfg_obj->info[SOCK_DEV] = mm_daemon_util_thread_open(
             &sd->camera_sd[cam_idx], cam_idx,
@@ -3706,7 +3681,25 @@ static void *mm_daemon_config_thread(void *data)
         ALOGE("%s: failed to create socket", __FUNCTION__);
         pthread_cond_signal(&cfg_obj->cfg->cond);
         pthread_mutex_unlock(&cfg_obj->cfg->lock);
-        goto buf_close;
+        goto cfg_close;
+    }
+
+    /* VFE */
+    cfg_obj->vfe_fd = open(sd->vfe_sd.devpath, O_RDWR | O_NONBLOCK);
+    if (cfg_obj->vfe_fd <= 0) {
+        ALOGE("%s: failed to open VFE device at %s", __FUNCTION__, sd->vfe_sd.devpath);
+        pthread_cond_signal(&cfg_obj->cfg->cond);
+        pthread_mutex_unlock(&cfg_obj->cfg->lock);
+        goto thread_close;
+    }
+
+    /* BUF */
+    cfg_obj->buf_fd = open(sd->buf.devpath, O_RDWR | O_NONBLOCK);
+    if (cfg_obj->buf_fd <= 0) {
+        ALOGE("%s: failed to open genbuf device", __FUNCTION__);
+        pthread_cond_signal(&cfg_obj->cfg->cond);
+        pthread_mutex_unlock(&cfg_obj->cfg->lock);
+        goto thread_close;
     }
 
     /* SNSR */
@@ -3717,7 +3710,7 @@ static void *mm_daemon_config_thread(void *data)
         ALOGE("%s: Failed to launch sensor thread", __FUNCTION__);
         pthread_cond_signal(&cfg_obj->cfg->cond);
         pthread_mutex_unlock(&cfg_obj->cfg->lock);
-        goto sock_close;
+        goto thread_close;
     }
 
     /* CSI */
@@ -3726,7 +3719,7 @@ static void *mm_daemon_config_thread(void *data)
                 &sd->csi[cfg_obj->sdata->csi_dev],
                 cam_idx, cfg_obj->cfg->pfds[1]);
         if (!cfg_obj->info[CSI_DEV])
-            goto snsr_close;
+            goto thread_close;
     }
 
     /* LED */
@@ -3756,10 +3749,10 @@ static void *mm_daemon_config_thread(void *data)
     pthread_cond_signal(&cfg_obj->cfg->cond);
     pthread_mutex_unlock(&cfg_obj->cfg->lock);
     fds[0].fd = cfg_obj->vfe_fd;
+    fds[0].events = POLLIN|POLLRDNORM|POLLPRI;
     fds[1].fd = cfg_obj->cfg->pfds[0];
+    fds[1].events = POLLIN|POLLRDNORM|POLLPRI;
     do {
-        for (i = 0; i < 2; i++)
-            fds[i].events = POLLIN|POLLRDNORM|POLLPRI;
         if (poll(fds, 2, -1) > 0) {
             if (fds[0].revents & POLLPRI)
                 ret = mm_daemon_config_dequeue(cfg_obj);
@@ -3794,15 +3787,12 @@ static void *mm_daemon_config_thread(void *data)
         close(cfg_obj->ion_fd);
         cfg_obj->ion_fd = 0;
     }
-snsr_close:
-sock_close:
+thread_close:
     mm_daemon_config_thread_close(cfg_obj);
-buf_close:
     if (cfg_obj->buf_fd > 0) {
         close(cfg_obj->buf_fd);
         cfg_obj->buf_fd = 0;
     }
-vfe_close:
     if (cfg_obj->vfe_fd > 0) {
         close(cfg_obj->vfe_fd);
         cfg_obj->vfe_fd = 0;
