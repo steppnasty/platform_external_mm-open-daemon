@@ -419,23 +419,21 @@ static cam_capability_t s5k4e1gx_capabilities = {
     .hor_view_angle = 54.8,
     .ver_view_angle = 42.5,
 
-    .preview_sizes_tbl_cnt = 6,
+    .preview_sizes_tbl_cnt = 5,
     .preview_sizes_tbl = {
         {1280, 720},
+        {800, 480},
         {720, 480},
         {640, 480},
-        {352, 288},
-        {320, 240},
         {176, 144},
     },
 
-    .video_sizes_tbl_cnt = 6,
+    .video_sizes_tbl_cnt = 5,
     .video_sizes_tbl = {
         {1280, 720},
+        {800, 480}:
         {720, 480},
         {640, 480},
-        {352, 288},
-        {320, 240},
         {176, 144},
     },
 
