@@ -181,18 +181,12 @@ static int mm_daemon_sensor_execute_cmd(mm_daemon_thread_info *info,
 
     switch (cmd) {
     case SENSOR_CMD_PREVIEW:
-        pthread_mutex_lock(&info->lock);
         if ((rc = mm_snsr->cfg->ops->prev(mm_snsr->cfg)) < 0)
             ALOGE("%s: Error while setting preview mode", __FUNCTION__);
-        pthread_cond_signal(&info->cond);
-        pthread_mutex_unlock(&info->lock);
         break;
     case SENSOR_CMD_SNAPSHOT:
-        pthread_mutex_lock(&info->lock);
         if ((rc = mm_snsr->cfg->ops->snap(mm_snsr->cfg)) < 0)
             ALOGE("%s: Error while setting snapshot mode", __FUNCTION__);
-        pthread_cond_signal(&info->cond);
-        pthread_mutex_unlock(&info->lock);
         break;
     case SENSOR_CMD_GAIN_UPDATE:
         mm_snsr->cfg->curr_gain = val;
@@ -260,29 +254,24 @@ static void mm_daemon_sensor_shutdown(mm_daemon_thread_info *info)
     }
 }
 
-static int mm_daemon_sensor_read_cmd(mm_daemon_thread_info *info)
+static int mm_daemon_sensor_read_cmd(mm_daemon_thread_info *info, uint8_t cmd,
+        uint32_t val)
 {
-    ssize_t read_len;
     mm_daemon_sensor_t *mm_snsr = (mm_daemon_sensor_t *)info->obj;
-    mm_daemon_pipe_evt_t pipe_cmd;
 
-    read_len = read(info->pfds[0], &pipe_cmd, sizeof(pipe_cmd));
-
-    if (pipe_cmd.cmd == SENSOR_CMD_POWER_UP ||
-            pipe_cmd.cmd == SENSOR_CMD_SHUTDOWN)
+    if (cmd == SENSOR_CMD_POWER_UP || cmd == SENSOR_CMD_SHUTDOWN)
         goto execute;
 
     if (mm_snsr->sensor_state == SENSOR_POWER_OFF) {
-        if (pipe_cmd.cmd == SENSOR_CMD_PREVIEW ||
-                pipe_cmd.cmd == SENSOR_CMD_SNAPSHOT) {
+        if (cmd == SENSOR_CMD_PREVIEW || cmd == SENSOR_CMD_SNAPSHOT) {
             ALOGE("%s: Can't start stream before powerup", __FUNCTION__);
             return -1;
         }
-        return mm_daemon_sensor_queue_cmd(pipe_cmd.cmd, pipe_cmd.val);
+        return mm_daemon_sensor_queue_cmd(cmd, val);
     }
 
 execute:
-    return mm_daemon_sensor_execute_cmd(info, mm_snsr, pipe_cmd.cmd, pipe_cmd.val);
+    return mm_daemon_sensor_execute_cmd(info, mm_snsr, cmd, val);
 }
 
 static int mm_daemon_sensor_empty_queue(mm_daemon_thread_info *info,

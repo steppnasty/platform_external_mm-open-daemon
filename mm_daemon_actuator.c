@@ -89,21 +89,18 @@ static void mm_daemon_act_shutdown(mm_daemon_thread_info *info)
     }
 }
 
-static int mm_daemon_act_cmd(mm_daemon_thread_info *info)
+static int mm_daemon_act_cmd(mm_daemon_thread_info *info, uint8_t cmd,
+        uint32_t val)
 {
     int rc = 0;
-    ssize_t read_len;
     mm_daemon_act_t *mm_act = (mm_daemon_act_t *)info->obj;
-    mm_daemon_pipe_evt_t pipe_cmd;
 
-    read_len = read(info->pfds[0], &pipe_cmd, sizeof(pipe_cmd));
-
-    switch (pipe_cmd.cmd) {
+    switch (cmd) {
     case ACT_CMD_SHUTDOWN:
         rc = -1;
         break;
     case ACT_CMD_MOVE_FOCUS:
-        rc = mm_daemon_act_move_focus(mm_act, pipe_cmd.val);
+        rc = mm_daemon_act_move_focus(mm_act, val);
         break;
     case ACT_CMD_DEFAULT_FOCUS:
         rc = mm_daemon_act_move_focus(mm_act, mm_act->curr_step_pos * -1);

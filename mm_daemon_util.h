@@ -29,7 +29,7 @@ struct mm_daemon_thread_ops {
     int (*init)(mm_daemon_thread_info *info);
     void (*stop)(mm_daemon_thread_info *info);
     void (*shutdown)(mm_daemon_thread_info *info);
-    int (*cmd)(mm_daemon_thread_info *info);
+    int (*cmd)(mm_daemon_thread_info *info, uint8_t cmd, uint32_t val);
 };
 
 mm_daemon_thread_info *mm_daemon_util_thread_open(mm_daemon_sd_info *sd,
@@ -39,5 +39,5 @@ int mm_daemon_util_set_thread_state(mm_daemon_thread_info *info,
         mm_daemon_thread_state state);
 void mm_daemon_util_pipe_cmd(int32_t pfd, uint8_t cmd, int32_t val);
 void mm_daemon_util_subdev_cmd(mm_daemon_thread_info *info, uint8_t cmd,
-        int32_t val, int wait);
+        int32_t val, uint8_t wait);
 #endif /* MM_DAEMON_UTIL_H */

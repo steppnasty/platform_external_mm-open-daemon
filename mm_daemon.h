@@ -286,6 +286,7 @@ typedef enum {
 } mm_daemon_server_cmd_t;
 
 typedef struct {
+    uint8_t wait;
     uint8_t cmd;
     uint32_t val;
 } mm_daemon_pipe_evt_t;

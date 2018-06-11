@@ -109,7 +109,7 @@ static void mm_daemon_config_parm_flash(mm_daemon_cfg_t *cfg_obj, int32_t mode)
     if (mode == CAM_FLASH_MODE_TORCH)
         fl = MSM_CAMERA_LED_TORCH;
 
-    mm_daemon_util_subdev_cmd(cfg_obj->info[LED_DEV], LED_CMD_CONTROL, fl, 0);
+    mm_daemon_util_subdev_cmd(cfg_obj->info[LED_DEV], LED_CMD_CONTROL, fl, FALSE);
 }
 
 static void mm_daemon_config_parm(mm_daemon_cfg_t *cfg_obj)
@@ -139,7 +139,7 @@ static void mm_daemon_config_parm(mm_daemon_cfg_t *cfg_obj)
                     memcpy(cvalue, pvalue, sizeof(int32_t));
                     if (cfg_obj->sdata->uses_sensor_ctrls)
                         mm_daemon_util_subdev_cmd(cfg_obj->info[SNSR_DEV],
-                                SENSOR_CMD_AB, *cvalue, 0);
+                                SENSOR_CMD_AB, *cvalue, FALSE);
                 }
                 break;
             }
@@ -181,7 +181,7 @@ static void mm_daemon_config_parm(mm_daemon_cfg_t *cfg_obj)
                     memcpy(cvalue, pvalue, sizeof(int32_t));
                     if (cfg_obj->sdata->uses_sensor_ctrls)
                         mm_daemon_util_subdev_cmd(cfg_obj->info[SNSR_DEV],
-                                SENSOR_CMD_WB, *cvalue, 0);
+                                SENSOR_CMD_WB, *cvalue, FALSE);
                 }
                 break;
             }
@@ -192,7 +192,7 @@ static void mm_daemon_config_parm(mm_daemon_cfg_t *cfg_obj)
                     memcpy(cvalue, pvalue, sizeof(int32_t));
                     if (cfg_obj->sdata->uses_sensor_ctrls)
                         mm_daemon_util_subdev_cmd(cfg_obj->info[SNSR_DEV],
-                                SENSOR_CMD_EFFECT, *cvalue, 0);
+                                SENSOR_CMD_EFFECT, *cvalue, FALSE);
                 }
                 break;
             }
@@ -226,7 +226,7 @@ static void mm_daemon_config_parm(mm_daemon_cfg_t *cfg_obj)
                     memcpy(cvalue, pvalue, sizeof(int32_t));
                     if (cfg_obj->sdata->uses_sensor_ctrls)
                         mm_daemon_util_subdev_cmd(cfg_obj->info[SNSR_DEV],
-                                SENSOR_CMD_SHARPNESS, *cvalue, 0);
+                                SENSOR_CMD_SHARPNESS, *cvalue, FALSE);
                 }
                 break;
             }
@@ -237,7 +237,7 @@ static void mm_daemon_config_parm(mm_daemon_cfg_t *cfg_obj)
                     memcpy(cvalue, pvalue, sizeof(int32_t));
                     if (cfg_obj->sdata->uses_sensor_ctrls)
                         mm_daemon_util_subdev_cmd(cfg_obj->info[SNSR_DEV],
-                                SENSOR_CMD_CONTRAST, *cvalue, 0);
+                                SENSOR_CMD_CONTRAST, *cvalue, FALSE);
                 }
                 break;
             }
@@ -248,7 +248,7 @@ static void mm_daemon_config_parm(mm_daemon_cfg_t *cfg_obj)
                     memcpy(cvalue, pvalue, sizeof(int32_t));
                     if (cfg_obj->sdata->uses_sensor_ctrls)
                         mm_daemon_util_subdev_cmd(cfg_obj->info[SNSR_DEV],
-                                SENSOR_CMD_SATURATION, *cvalue, 0);
+                                SENSOR_CMD_SATURATION, *cvalue, FALSE);
                 }
                 break;
             }
@@ -259,7 +259,7 @@ static void mm_daemon_config_parm(mm_daemon_cfg_t *cfg_obj)
                     memcpy(cvalue, pvalue, sizeof(int32_t));
                     if (cfg_obj->sdata->uses_sensor_ctrls)
                         mm_daemon_util_subdev_cmd(cfg_obj->info[SNSR_DEV],
-                                SENSOR_CMD_BRIGHTNESS, *cvalue, 0);
+                                SENSOR_CMD_BRIGHTNESS, *cvalue, FALSE);
                 }
                 break;
             }
@@ -2786,7 +2786,7 @@ static void mm_daemon_config_stats(mm_daemon_cfg_t *cfg_obj, uint16_t req_stats,
 static void mm_daemon_config_exp_gain(mm_daemon_cfg_t *cfg_obj, uint16_t gain)
 {
     mm_daemon_util_subdev_cmd(cfg_obj->info[SNSR_DEV],
-            SENSOR_CMD_EXP_GAIN, gain, 0);
+            SENSOR_CMD_EXP_GAIN, gain, FALSE);
     cfg_obj->ae.curr_gain = gain;
 }
 
@@ -2799,10 +2799,11 @@ static int mm_daemon_config_start_preview(mm_daemon_cfg_t *cfg_obj)
         return -ENOMEM;
 
     if (cfg_obj->info[CSI_DEV])
-        mm_daemon_util_subdev_cmd(cfg_obj->info[CSI_DEV], CSI_CMD_CFG, 0, 0);
+        mm_daemon_util_subdev_cmd(cfg_obj->info[CSI_DEV],
+                CSI_CMD_CFG, 0, FALSE);
 
     mm_daemon_util_subdev_cmd(cfg_obj->info[SNSR_DEV],
-            SENSOR_CMD_PREVIEW, 0, 1);
+            SENSOR_CMD_PREVIEW, 0, TRUE);
     mm_daemon_config_exp_gain(cfg_obj, cfg_obj->ae.curr_gain);
 
     if (buf->stream_info->num_bufs)
@@ -2844,7 +2845,7 @@ static void mm_daemon_config_stop_preview(mm_daemon_cfg_t *cfg_obj)
     mm_daemon_config_isp_stream_release(cfg_obj, stream_type);
     if (cfg_obj->prep_snapshot)
         mm_daemon_util_subdev_cmd(cfg_obj->info[LED_DEV],
-            LED_CMD_CONTROL, MSM_CAMERA_LED_OFF, 0);
+            LED_CMD_CONTROL, MSM_CAMERA_LED_OFF, FALSE);
     mm_daemon_config_vfe_stop(cfg_obj);
 }
 
@@ -2855,7 +2856,7 @@ static void mm_daemon_config_prepare_snapshot(mm_daemon_cfg_t *cfg_obj)
 
     cfg_obj->prep_snapshot = 1;
     mm_daemon_util_subdev_cmd(cfg_obj->info[LED_DEV],
-            LED_CMD_CONTROL, MSM_CAMERA_LED_LOW, 0);
+            LED_CMD_CONTROL, MSM_CAMERA_LED_LOW, FALSE);
 }
 
 static int mm_daemon_config_start_snapshot(mm_daemon_cfg_t *cfg_obj)
@@ -2863,7 +2864,7 @@ static int mm_daemon_config_start_snapshot(mm_daemon_cfg_t *cfg_obj)
     cam_stream_type_t stream_type = CAM_STREAM_TYPE_SNAPSHOT;
 
     mm_daemon_util_subdev_cmd(cfg_obj->info[SNSR_DEV],
-            SENSOR_CMD_SNAPSHOT, 0, 1);
+            SENSOR_CMD_SNAPSHOT, 0, TRUE);
     if (cfg_obj->prep_snapshot)
         mm_daemon_config_exp_gain(cfg_obj, cfg_obj->ae.curr_gain / 4);
     mm_daemon_config_vfe_roll_off(cfg_obj, stream_type);
@@ -2884,7 +2885,7 @@ static int mm_daemon_config_start_snapshot(mm_daemon_cfg_t *cfg_obj)
     mm_daemon_config_vfe_rgb_gamma_chbank(cfg_obj, 12);
     if (cfg_obj->prep_snapshot) {
         mm_daemon_util_subdev_cmd(cfg_obj->info[LED_DEV],
-                LED_CMD_CONTROL, MSM_CAMERA_LED_HIGH, 0);
+                LED_CMD_CONTROL, MSM_CAMERA_LED_HIGH, FALSE);
         cfg_obj->prep_snapshot = 0;
     }
     mm_daemon_config_vfe_camif(cfg_obj, stream_type);
@@ -2902,7 +2903,7 @@ static void mm_daemon_config_stop_snapshot(mm_daemon_cfg_t *cfg_obj)
 {
     if (cfg_obj->prep_snapshot) {
         mm_daemon_util_subdev_cmd(cfg_obj->info[LED_DEV],
-                LED_CMD_CONTROL, MSM_CAMERA_LED_OFF, 0);
+                LED_CMD_CONTROL, MSM_CAMERA_LED_OFF, FALSE);
         cfg_obj->prep_snapshot = 0;
     }
     mm_daemon_config_isp_stream_cfg(cfg_obj, CAM_STREAM_TYPE_SNAPSHOT,
@@ -3212,7 +3213,7 @@ static void mm_daemon_config_auto_focus_start(mm_daemon_cfg_t *cfg_obj)
 
     if (cfg_obj->af.curr_step_pos != 0) {
         mm_daemon_util_subdev_cmd(cfg_obj->info[ACT_DEV],
-                ACT_CMD_DEFAULT_FOCUS, 0, 0);
+                ACT_CMD_DEFAULT_FOCUS, 0, FALSE);
         memset(&cfg_obj->af, 0, sizeof(struct mm_daemon_af_info));
     }
     mm_daemon_config_stats(cfg_obj, BIT(MSM_ISP_STATS_AF), 1);
@@ -3270,7 +3271,7 @@ static void mm_daemon_config_auto_focus(mm_daemon_cfg_t *cfg_obj,
         cfg_obj->af.state = MM_FOCUS_SCANNING;
         cfg_obj->af.incr_step = total_steps / 2;
         mm_daemon_util_subdev_cmd(cfg_obj->info[ACT_DEV], ACT_CMD_MOVE_FOCUS,
-                cfg_obj->af.incr_step, 0);
+                cfg_obj->af.incr_step, FALSE);
         break;
     case MM_FOCUS_SCANNING:
         cfg_obj->af.incr_step /= 2;
@@ -3278,7 +3279,7 @@ static void mm_daemon_config_auto_focus(mm_daemon_cfg_t *cfg_obj,
             cfg_obj->af.state = MM_FOCUS_SCANNING_DONE;
 
         mm_daemon_util_subdev_cmd(cfg_obj->info[ACT_DEV],
-                ACT_CMD_MOVE_FOCUS, cfg_obj->af.incr_step * focus_dir, 0);
+                ACT_CMD_MOVE_FOCUS, cfg_obj->af.incr_step * focus_dir, FALSE);
         break;
     case MM_FOCUS_SCANNING_DONE:
         if (cfg_obj->af.curr_step_pos == cfg_obj->af.focus_step_pos) {
@@ -3287,7 +3288,7 @@ static void mm_daemon_config_auto_focus(mm_daemon_cfg_t *cfg_obj,
         } else
             mm_daemon_util_subdev_cmd(cfg_obj->info[ACT_DEV],
                     ACT_CMD_MOVE_FOCUS, cfg_obj->af.focus_step_pos -
-                    cfg_obj->af.curr_step_pos, 0);
+                    cfg_obj->af.curr_step_pos, FALSE);
         break;
     default:
         break;
@@ -3462,7 +3463,7 @@ static int mm_daemon_config_read_pipe(mm_daemon_cfg_t *cfg_obj)
         if (idx == MAX_NUM_STREAM)
             return -ENOMEM;
         mm_daemon_util_subdev_cmd(cfg_obj->info[SNSR_DEV],
-                SENSOR_CMD_POWER_UP, 0, 0);
+                SENSOR_CMD_POWER_UP, 0, FALSE);
         cfg_obj->stream_buf[idx] = (mm_daemon_buf_info *)malloc(
                 sizeof(mm_daemon_buf_info));
         memset(cfg_obj->stream_buf[idx], 0, sizeof(mm_daemon_buf_info));
@@ -3763,7 +3764,7 @@ static void *mm_daemon_config_thread(void *data)
                 usleep(1000);
             if (ret < 0) {
                 mm_daemon_util_subdev_cmd(cfg_obj->info[SNSR_DEV],
-                        SENSOR_CMD_SHUTDOWN, 0, 0);
+                        SENSOR_CMD_SHUTDOWN, 0, FALSE);
                 info->state = STATE_STOPPED;
                 break;
             }

@@ -53,16 +53,14 @@ static void mm_daemon_csic_shutdown(mm_daemon_thread_info *info)
     }
 }
 
-static int mm_daemon_csic_cmd(mm_daemon_thread_info *info)
+static int mm_daemon_csic_cmd(mm_daemon_thread_info *info, uint8_t cmd,
+        uint32_t val)
 {
     int rc = 0;
-    ssize_t read_len;
     mm_daemon_csi_t *mm_csi = (mm_daemon_csi_t *)info->obj;
-    mm_daemon_pipe_evt_t pipe_cmd;
 
-    read_len = read(info->pfds[0], &pipe_cmd, sizeof(pipe_cmd));
-
-    switch (pipe_cmd.cmd) {
+    ALOGV("%s: cmd %d val %d", __FUNCTION__, cmd, val);
+    switch (cmd) {
         case CSI_CMD_CFG:
             rc = mm_daemon_csic_cfg(mm_csi);
             break;

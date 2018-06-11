@@ -63,18 +63,15 @@ static void mm_daemon_led_shutdown(mm_daemon_thread_info *info)
     }
 }
 
-static int mm_daemon_led_cmd(mm_daemon_thread_info *info)
+static int mm_daemon_led_cmd(mm_daemon_thread_info *info, uint8_t cmd,
+        uint32_t val)
 {
     int rc = 0;
-    ssize_t read_len;
     mm_daemon_led_t *mm_led = (mm_daemon_led_t *)info->obj;
-    mm_daemon_pipe_evt_t pipe_cmd;
 
-    read_len = read(info->pfds[0], &pipe_cmd, sizeof(pipe_cmd));
-
-    switch (pipe_cmd.cmd) {
+    switch (cmd) {
     case LED_CMD_CONTROL:
-        mm_daemon_led_control(mm_led, pipe_cmd.val);
+        mm_daemon_led_control(mm_led, val);
         break;
     case LED_CMD_SHUTDOWN:
         rc = -1;

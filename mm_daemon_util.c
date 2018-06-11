@@ -25,7 +25,11 @@
 static void *mm_daemon_util_thread_poll_start(void *data)
 {
     mm_daemon_thread_info *info = (mm_daemon_thread_info *)data;
+    mm_daemon_pipe_evt_t pipe_cmd;
     struct pollfd pfd;
+    ssize_t read_len;
+    uint8_t wait;
+    int ret = 0;
 
     if (info->ops->init(info) < 0) {
         mm_daemon_util_pipe_cmd(info->cb_pfd, CFG_CMD_ERR, info->type);
@@ -40,9 +44,17 @@ static void *mm_daemon_util_thread_poll_start(void *data)
         if (poll(&pfd, 1, -1) > 0) {
             if (mm_daemon_util_set_thread_state(info, STATE_BUSY) < 0)
                 break;
-            if ((pfd.revents & POLLIN) &&
-                    (pfd.revents & POLLRDNORM)) {
-                if (info->ops->cmd(info) < 0)
+            if ((pfd.revents & POLLIN) && (pfd.revents & POLLRDNORM)) {
+                read_len = read(info->pfds[0], &pipe_cmd, sizeof(pipe_cmd));
+                wait = pipe_cmd.wait;
+                if (wait)
+                    pthread_mutex_lock(&info->lock);
+                ret = info->ops->cmd(info, pipe_cmd.cmd, pipe_cmd.val);
+                if (wait) {
+                    pthread_cond_signal(&info->cond);
+                    pthread_mutex_unlock(&info->lock);
+                }
+                if (ret < 0)
                     break;
             } else
                 usleep(1000);
@@ -176,12 +188,17 @@ void mm_daemon_util_pipe_cmd(int32_t pfd, uint8_t cmd, int32_t val)
  *   @wait: set to 1 to wait for polling thread to unlock before continuing
  *==========================================================================*/
 void mm_daemon_util_subdev_cmd(mm_daemon_thread_info *info, uint8_t cmd,
-        int32_t val, int wait)
+        int32_t val, uint8_t wait)
 {
+    mm_daemon_pipe_evt_t pipe_cmd;
+
     if (!info)
         return;
 
-    mm_daemon_util_pipe_cmd(info->pfds[1], cmd, val);
+    pipe_cmd.wait = wait;
+    pipe_cmd.cmd = cmd;
+    pipe_cmd.val = val;
+    write(info->pfds[1], &pipe_cmd, sizeof(pipe_cmd));
     if (wait) {
         pthread_mutex_lock(&info->lock);
         pthread_cond_wait(&info->cond, &info->lock);
