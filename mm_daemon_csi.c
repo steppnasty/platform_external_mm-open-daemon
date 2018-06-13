@@ -59,7 +59,7 @@ static int mm_daemon_csic_cmd(mm_daemon_thread_info *info, uint8_t cmd,
     int rc = 0;
     mm_daemon_csi_t *mm_csi = (mm_daemon_csi_t *)info->obj;
 
-    ALOGV("%s: cmd %d val %d", __FUNCTION__, cmd, val);
+    ALOGD("%s: cmd %d val %d", __FUNCTION__, cmd, val);
     switch (cmd) {
         case CSI_CMD_CFG:
             rc = mm_daemon_csic_cfg(mm_csi);
