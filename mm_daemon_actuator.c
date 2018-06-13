@@ -20,6 +20,8 @@
    The GNU General Public License is contained in the file COPYING.
 */
 
+#define LOG_TAG "mm-daemon-actuator"
+
 #include "mm_daemon_actuator.h"
 #include "mm_daemon_util.h"
 
@@ -32,6 +34,11 @@ static int mm_daemon_act_move_focus(mm_daemon_act_t *mm_act, int32_t num_steps)
     uint32_t total_steps;
     struct msm_actuator_cfg_data cdata;
     struct damping_params_t damping_params;
+
+    if (!mm_act->is_focus_ready) {
+        ALOGE("%s: actuator info not set", __FUNCTION__);
+        return -EINVAL;
+    }
 
     if (num_steps < 0) {
         dir = MOVE_FAR;
@@ -77,13 +84,34 @@ static int mm_daemon_act_move_focus(mm_daemon_act_t *mm_act, int32_t num_steps)
     return rc;
 }
 
+static int mm_daemon_act_init_focus(mm_daemon_act_t *mm_act)
+{
+    struct msm_actuator_cfg_data cdata;
+
+    if (mm_act->is_focus_ready)
+        return 0;
+
+    cdata.cfgtype = CFG_SET_ACTUATOR_INFO;
+    memcpy(&cdata.cfg.set_info, mm_act->params->act_info,
+            sizeof(struct msm_actuator_set_info_t));
+
+    if (ioctl(mm_act->fd, VIDIOC_MSM_ACTUATOR_CFG, &cdata) == 0) {
+        mm_act->is_focus_ready = TRUE;
+        return 0;
+    }
+
+    return -EINVAL;
+}
+
 static void mm_daemon_act_shutdown(mm_daemon_thread_info *info)
 {
     mm_daemon_act_t *mm_act = (mm_daemon_act_t *)info->obj;
 
     if (mm_act) {
-        if (mm_act->fd)
+        if (mm_act->fd) {
             close(mm_act->fd);
+            mm_act->fd = 0;
+        }
         free(info->obj);
         info->obj = NULL;
     }
@@ -98,6 +126,9 @@ static int mm_daemon_act_cmd(mm_daemon_thread_info *info, uint8_t cmd,
     switch (cmd) {
     case ACT_CMD_SHUTDOWN:
         rc = -1;
+        break;
+    case ACT_CMD_INIT_FOCUS:
+        rc = mm_daemon_act_init_focus(mm_act);
         break;
     case ACT_CMD_MOVE_FOCUS:
         rc = mm_daemon_act_move_focus(mm_act, val);
@@ -118,7 +149,6 @@ static int mm_daemon_act_cmd(mm_daemon_thread_info *info, uint8_t cmd,
 static int mm_daemon_act_init(mm_daemon_thread_info *info)
 {
     mm_daemon_act_t *mm_act = NULL;
-    struct msm_actuator_cfg_data cdata;
 
     if (!info->data)
         goto error;
@@ -133,18 +163,10 @@ static int mm_daemon_act_init(mm_daemon_thread_info *info)
 
     mm_act->fd = open(info->devpath, O_RDWR | O_NONBLOCK);
     if (mm_act->fd > 0) {
-        cdata.cfgtype = CFG_SET_ACTUATOR_INFO;
-        memcpy(&cdata.cfg.set_info, mm_act->params->act_info,
-                sizeof(struct msm_actuator_set_info_t));
-
-        if (ioctl(mm_act->fd, VIDIOC_MSM_ACTUATOR_CFG, &cdata) == 0) {
-            info->obj = (void *)mm_act;
-            return 0;
-        }
+        info->obj = (void *)mm_act;
+        return 0;
     }
 
-    if (mm_act->fd)
-        close(mm_act->fd);
 param_error:
     if (mm_act)
         free(mm_act);

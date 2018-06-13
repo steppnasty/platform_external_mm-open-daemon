@@ -2806,6 +2806,9 @@ static int mm_daemon_config_start_preview(mm_daemon_cfg_t *cfg_obj)
             SENSOR_CMD_PREVIEW, 0, TRUE);
     mm_daemon_config_exp_gain(cfg_obj, cfg_obj->ae.curr_gain);
 
+    mm_daemon_util_subdev_cmd(cfg_obj->info[ACT_DEV],
+            ACT_CMD_INIT_FOCUS, 0, FALSE);
+
     if (buf->stream_info->num_bufs)
         mm_daemon_config_isp_buf_enqueue(cfg_obj, stream_type);
     mm_daemon_config_vfe_roll_off(cfg_obj, stream_type);

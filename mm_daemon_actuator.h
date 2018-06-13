@@ -27,14 +27,16 @@
 
 typedef enum {
     ACT_CMD_SHUTDOWN,
+    ACT_CMD_INIT_FOCUS,
     ACT_CMD_MOVE_FOCUS,
     ACT_CMD_DEFAULT_FOCUS,
 } mm_daemon_act_cmd_t;
 
 typedef struct mm_daemon_act {
-    struct mm_daemon_act_params *params;
     int fd;
+    struct mm_daemon_act_params *params;
     int16_t curr_step_pos;
+    uint8_t is_focus_ready;
 } mm_daemon_act_t;
 
 #endif
