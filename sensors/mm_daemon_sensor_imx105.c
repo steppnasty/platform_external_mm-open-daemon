@@ -180,17 +180,17 @@ static struct msm_camera_i2c_reg_array imx105_stop_settings[] = {
     {0x0100, 0x00, 0},
 };
 
-static struct reg_settings_t imx105_act_init_settings[] = {
-    {0x0104, 0x01},
-    {0x3408, 0x02},
-    {0x340A, 0x01},
-    {0x340C, 0x01},
-    {0x3081, 0x4C},
-    {0x3400, 0x01},
-    {0x3401, 0x08},
-    {0x3404, 0x17},
-    {0x3405, 0x00},
-    {0x0104, 0x00},
+static struct msm_camera_i2c_reg_array imx105_act_init_settings[] = {
+    {0x0104, 0x01, 0},
+    {0x3408, 0x02, 0},
+    {0x340A, 0x01, 0},
+    {0x340C, 0x01, 0},
+    {0x3081, 0x4C, 0},
+    {0x3400, 0x01, 0},
+    {0x3401, 0x08, 0},
+    {0x3404, 0x17, 0},
+    {0x3405, 0x00, 0},
+    {0x0104, 0x00, 0},
 };
 
 static int imx105_stream_start(mm_sensor_cfg_t *cfg)
@@ -294,6 +294,12 @@ static int imx105_init(mm_sensor_cfg_t *cfg)
 
     rc = cfg->ops->i2c_write_array(cfg->mm_snsr, &imx105_init_settings[0],
             ARRAY_SIZE(imx105_init_settings), dt);
+
+    if (rc < 0)
+        return rc;
+
+    rc = cfg->ops->i2c_write_array(cfg->mm_snsr, &imx105_act_init_settings[0],
+            ARRAY_SIZE(imx105_act_init_settings), dt);
 
     return rc;
 }
@@ -509,16 +515,16 @@ static struct msm_actuator_set_info_t imx105_act_info = {
         .act_type = ACTUATOR_VCM,
         .reg_tbl_size = ARRAY_SIZE(imx105_act_reg_tbl),
         .data_size = 10,
-        .init_setting_size = ARRAY_SIZE(imx105_act_init_settings),
+        .init_setting_size = 0,
         .i2c_addr = 0x1A << 1,
         .i2c_addr_type = MSM_ACTUATOR_WORD_ADDR,
         .i2c_data_type = MSM_ACTUATOR_BYTE_DATA,
         .reg_tbl_params = imx105_act_reg_tbl,
-        .init_settings = imx105_act_init_settings,
+        .init_settings = NULL,
     },
     .af_tuning_params = {
         .initial_code = 0,
-        .region_size = 3,
+        .region_size = ARRAY_SIZE(imx105_act_region_params),
         .total_steps = IMX105_TOTAL_STEPS,
         .region_params = imx105_act_region_params,
     },
