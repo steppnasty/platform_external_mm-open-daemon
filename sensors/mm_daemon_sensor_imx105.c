@@ -29,7 +29,7 @@
 #define IMX105_MAX_ANALOG_GAIN 224
 #define IMX105_MIN_ANALOG_GAIN 0
 #define IMX105_MAX_DIGITAL_GAIN 384
-#define IMX105_MIN_DIGIATL_GAIN 256
+#define IMX105_MIN_DIGITAL_GAIN 256
 #define MSB(word) (word & 0xFF00) >> 8
 #define LSB(word) (word & 0x00FF)
 
