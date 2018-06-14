@@ -57,6 +57,7 @@ static void mm_daemon_led_shutdown(mm_daemon_thread_info *info)
         if (mm_led->fd) {
             mm_daemon_led_control(mm_led, MSM_CAMERA_LED_RELEASE);
             close(mm_led->fd);
+            mm_led->fd = 0;
         }
         free(info->obj);
         info->obj = NULL;
@@ -98,8 +99,10 @@ static int mm_daemon_led_init(mm_daemon_thread_info *info)
         }
     }
 
-    if (mm_led->fd)
+    if (mm_led->fd) {
         close(mm_led->fd);
+        mm_led->fd = 0;
+    }
     if (mm_led)
         free(mm_led);
 

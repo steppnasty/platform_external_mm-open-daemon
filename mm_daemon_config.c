@@ -2966,9 +2966,10 @@ static int mm_daemon_config_sk_pkt_map(mm_daemon_cfg_t *cfg_obj,
             break;
         cfg_obj->cap_buf.vaddr = mmap(0, sizeof(cam_capability_t),
                 PROT_READ|PROT_WRITE, MAP_SHARED, sk_pkt->fd, 0);
-        if (cfg_obj->cap_buf.vaddr == MAP_FAILED)
+        if (cfg_obj->cap_buf.vaddr == MAP_FAILED) {
             close(sk_pkt->fd);
-        else {
+            sk_pkt->fd = 0;
+        } else {
             cfg_obj->cap_buf.fd = sk_pkt->fd;
             cfg_obj->cap_buf.mapped = 1;
             memcpy(cfg_obj->cap_buf.vaddr, cfg_obj->sdata->cap,
@@ -2982,9 +2983,10 @@ static int mm_daemon_config_sk_pkt_map(mm_daemon_cfg_t *cfg_obj,
         cfg_obj->parm_buf.buf = (parm_buffer_t *)mmap(0,
                 sizeof(parm_buffer_t), PROT_READ|PROT_WRITE, MAP_SHARED,
                 sk_pkt->fd, 0);
-        if (cfg_obj->parm_buf.buf == MAP_FAILED)
+        if (cfg_obj->parm_buf.buf == MAP_FAILED) {
             close(sk_pkt->fd);
-        else {
+            sk_pkt->fd = 0;
+        } else {
             cfg_obj->parm_buf.fd = sk_pkt->fd;
             cfg_obj->parm_buf.mapped = 1;
             cfg_obj->parm_buf.cfg_buf = (parm_buffer_t *)calloc(1,
@@ -3013,6 +3015,7 @@ static int mm_daemon_config_sk_pkt_map(mm_daemon_cfg_t *cfg_obj,
         if (buf == NULL) {
             ALOGE("%s: no buffer for stream %d", __FUNCTION__, idx);
             close(sk_pkt->fd);
+            sk_pkt->fd = 0;
             break;
         }
         buf->stream_info =
@@ -3022,6 +3025,7 @@ static int mm_daemon_config_sk_pkt_map(mm_daemon_cfg_t *cfg_obj,
             ALOGE("%s: stream_info mapping failed for stream %d",
                     __FUNCTION__, stream_id);
             close(sk_pkt->fd);
+            sk_pkt->fd = 0;
             break;
         }
         buf->stream_info_mapped = 1;

@@ -244,8 +244,10 @@ static void mm_daemon_sensor_shutdown(mm_daemon_thread_info *info)
     if (mm_snsr) {
         mm_daemon_sensor_stop(mm_snsr);
         mm_daemon_sensor_empty_queue(info, mm_snsr, 0);
-        if (mm_snsr->cam_fd)
+        if (mm_snsr->cam_fd) {
             close(mm_snsr->cam_fd);
+            mm_snsr->cam_fd = 0;
+        }
         if (head) {
             free(head);
             head = NULL;
@@ -346,8 +348,10 @@ start_error:
         head = NULL;
     }
 init_error:
-    if (mm_snsr->cam_fd)
+    if (mm_snsr->cam_fd) {
         close(mm_snsr->cam_fd);
+        mm_snsr->cam_fd = 0;
+    }
 cam_error:
     if (mm_snsr)
         free(mm_snsr);

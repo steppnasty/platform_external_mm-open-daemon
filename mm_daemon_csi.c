@@ -20,6 +20,8 @@
    The GNU General Public License is contained in the file COPYING.
 */
 
+#define LOG_TAG "mm-daemon-csi"
+
 #include "mm_daemon_csi.h"
 #include "mm_daemon_util.h"
 
@@ -47,6 +49,7 @@ static void mm_daemon_csic_shutdown(mm_daemon_thread_info *info)
             cdata.cfgtype = CSIC_RELEASE;
             ioctl(mm_csi->fd, VIDIOC_MSM_CSIC_IO_CFG, &cdata);
             close(mm_csi->fd);
+            mm_csi->fd = 0;
         }
         free(info->obj);
         info->obj = NULL;
@@ -98,8 +101,10 @@ static int mm_daemon_csic_init(mm_daemon_thread_info *info)
         }
     }
 
-    if (mm_csi->fd)
+    if (mm_csi->fd) {
         close(mm_csi->fd);
+        mm_csi->fd = 0;
+    }
     if (mm_csi)
         free(mm_csi);
     return -EINVAL;
