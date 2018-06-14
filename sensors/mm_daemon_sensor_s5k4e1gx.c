@@ -483,7 +483,7 @@ static struct mm_sensor_stream_attr s5k4e1gx_attr_snapshot = {
     .ro_cfg = 0xC4A251,
     .h = 1960,
     .w = 2608,
-    .blk_l = 12,
+    .blk_l = 27,
     .blk_p = 130,
 };
 

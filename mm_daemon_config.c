@@ -1410,7 +1410,6 @@ static int mm_daemon_config_vfe_fov(mm_daemon_cfg_t *cfg_obj,
     int rc = 0;
     struct mm_sensor_stream_attr *sattr;
     uint32_t pix_offset;
-    float hal_aspect;
     uint32_t fov_w, fov_h;
     uint32_t reg_w, reg_h;
     cam_dimension_t dim;
@@ -1438,32 +1437,24 @@ static int mm_daemon_config_vfe_fov(mm_daemon_cfg_t *cfg_obj,
     if (!sattr)
         return -EINVAL;
 
-    fov_w = sattr->w - sattr->blk_l;
-    reg_w = fov_w - 1;
-    if ((dim.height == sattr->h) && (dim.width == sattr->w)) {
-        reg_h = sattr->h - 1;
-    } else {
-        hal_aspect = ((float)dim.height/(float)dim.width);
-        if (hal_aspect < ((float)sattr->h/(float)sattr->w)) {
-            fov_h = (uint32_t)(((float)dim.height/(float)dim.width) * fov_w);
-            pix_offset = (uint32_t)((float)(((int)sattr->h - (int)(sattr->blk_l/2)) -
-                    (int)fov_h)/2);
-
-            reg_h = (pix_offset << 16) | ((fov_h + pix_offset) - 1);
-        } else {
-            fov_h = (sattr->h - (sattr->blk_l/2));
-            fov_w = (uint32_t)(((float)dim.width/(float)dim.height) * fov_h);
-            pix_offset = (uint32_t)((float)(((int)sattr->w - (int)sattr->blk_l) -
-                    (int)fov_w)/2);
-            reg_h = fov_h - 1;
-            reg_w = (pix_offset << 16) | ((fov_w + pix_offset) - 1);
-        }
+    reg_h = sattr->h;
+    reg_w = sattr->w;
+    if (((float)dim.height/dim.width) < ((float)sattr->h/sattr->w)) {
+        reg_w -= 12;
+        fov_h = (uint32_t)(((float)dim.height/dim.width) * reg_w);
+        pix_offset = (uint32_t)((float)(((int)sattr->h - 6) - fov_h)/2);
+        reg_h = (pix_offset << 16) | (fov_h + pix_offset);
+    } else if (((float)dim.height/dim.width) > ((float)sattr->h/sattr->w)) {
+        reg_h -= 6;
+        fov_w = (uint32_t)(((float)dim.width/dim.height) * reg_h);
+        pix_offset = (uint32_t)((float)(((int)sattr->w - 12) - fov_w)/2);
+        reg_w = (pix_offset << 16) | (fov_w + pix_offset);
     }
 
     fov_cfg = (uint32_t *)malloc(8);
     p = fov_cfg;
-    *p++ = reg_w;
-    *p = reg_h;
+    *p++ = reg_w - 1;
+    *p = reg_h - 1;
 
     rc = mm_daemon_config_vfe_reg_cmd(cfg_obj, 8, (void *)fov_cfg,
             (void *)&reg_cfg_cmd, ARRAY_SIZE(reg_cfg_cmd));
@@ -1499,23 +1490,23 @@ static int mm_daemon_config_vfe_main_scaler(mm_daemon_cfg_t *cfg_obj,
     else
         sattr = cfg_obj->sdata->attr[PREVIEW];
 
-    if (((float)dim.height/(float)dim.width) < ((float)sattr->h/(float)sattr->w)) {
-        reg_w = (dim.width << 16) | (sattr->w - sattr->blk_l);
-        reg_h = (dim.height << 16) | (uint16_t)((sattr->w - sattr->blk_l) *
-                ((float)dim.height/(float)dim.width));
-    } else {
-        reg_h = (dim.height << 16) | (sattr->h - (sattr->blk_l/2));
-        reg_w = (dim.width << 16) | (uint16_t)((sattr->h - (sattr->blk_l/2)) *
-                ((float)dim.width/(float)dim.height));
+    reg_h = sattr->h;
+    reg_w = sattr->w;
+    if (((float)dim.height/dim.width) < ((float)sattr->h/sattr->w)) {
+        reg_w -= 12;
+        reg_h = (uint16_t)((sattr->w - 12) * ((float)dim.height/dim.width));
+    } else if (((float)dim.height/dim.width) > ((float)sattr->h/sattr->w)) {
+        reg_h -= 6;
+        reg_w = (uint16_t)((sattr->h - 6) * ((float)dim.width/dim.height));
     }
 
     ms_cfg = (uint32_t *)malloc(28);
     p = ms_cfg;
     *p++ = 0x3;
-    *p++ = reg_w;
+    *p++ = reg_w | (dim.width << 16);
     *p++ = 0x00310000;
     *p++ = 0x0;
-    *p++ = reg_h;
+    *p++ = reg_h | (dim.height << 16);
     *p++ = 0x00310000;
     *p = 0x0;
 
