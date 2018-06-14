@@ -36,7 +36,7 @@ struct imx105_pdata {
     uint16_t again;
 };
 
-static uint16_t imx105_pos_tbl[] = {
+static uint16_t imx105_act_pos_tbl[] = {
     0, 48, 96, 144, 156, 168, 184, 200, 216, 232, 248, 264, 280, 296, 312,
     328, 344, 360, 376, 392, 408, 424, 440, 456, 472, 488, 504, 520, 536,
     552, 568, 584, 600, 616, 632, 648, 664, 680, 696, 712, 728, 744,
@@ -255,18 +255,18 @@ static int imx105_exp_gain(mm_sensor_cfg_t *cfg, uint16_t again)
 }
 
 static void imx105_get_damping_params(uint16_t dest_step_pos,
-        uint16_t curr_step_pos, int32_t num_steps, int sign_dir,
+        uint16_t curr_step_pos, int sign_dir,
         struct damping_params_t *damping_params)
 {
-    uint16_t dest_lens_pos = imx105_pos_tbl[dest_step_pos];
-    uint16_t curr_lens_pos = imx105_pos_tbl[curr_step_pos];
+    uint16_t dest_lens_pos = imx105_act_pos_tbl[dest_step_pos];
+    uint16_t curr_lens_pos = imx105_act_pos_tbl[curr_step_pos];
     uint16_t damping_code_step;
     uint16_t target_dist;
     uint32_t sw_damping_time_wait;
 
     target_dist = sign_dir * (dest_lens_pos - curr_lens_pos);
 
-    if (sign_dir < 0 && (target_dist >= imx105_pos_tbl[DAMPING_THRESHOLD])) {
+    if (sign_dir < 0 && (target_dist >= imx105_act_pos_tbl[DAMPING_THRESHOLD])) {
         damping_code_step = target_dist / 4;
         sw_damping_time_wait = 10;
     } else {

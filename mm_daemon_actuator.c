@@ -31,9 +31,11 @@ static int mm_daemon_act_move_focus(mm_daemon_act_t *mm_act, int32_t num_steps)
     int8_t dir;
     int8_t sign_dir;
     int16_t dest_step_pos;
+    uint16_t region_size;
+    uint16_t region_idx;
     uint32_t total_steps;
     struct msm_actuator_cfg_data cdata;
-    struct damping_params_t damping_params;
+    struct damping_params_t *damping_params;
 
     if (!mm_act->is_focus_ready) {
         ALOGE("%s: actuator info not set", __FUNCTION__);
@@ -43,20 +45,19 @@ static int mm_daemon_act_move_focus(mm_daemon_act_t *mm_act, int32_t num_steps)
     if (num_steps < 0) {
         dir = MOVE_FAR;
         num_steps *= -1;
-    } else
+        sign_dir = MSM_ACTUATOR_MOVE_SIGNED_FAR;
+    } else {
         dir = MOVE_NEAR;
+        sign_dir = MSM_ACTUATOR_MOVE_SIGNED_NEAR;
+    }
 
+    region_size = mm_act->params->act_info->af_tuning_params.region_size;
     total_steps = mm_act->params->act_info->af_tuning_params.total_steps;
 
     if (num_steps > (int32_t)total_steps)
         num_steps = total_steps;
     else if (num_steps == 0)
         return 0;
-
-    if (dir == MOVE_NEAR)
-        sign_dir = MSM_ACTUATOR_MOVE_SIGNED_NEAR;
-    else
-        sign_dir = MSM_ACTUATOR_MOVE_SIGNED_FAR;
 
     dest_step_pos = mm_act->curr_step_pos + (sign_dir * num_steps);
     if (dest_step_pos < 0)
@@ -67,20 +68,27 @@ static int mm_daemon_act_move_focus(mm_daemon_act_t *mm_act, int32_t num_steps)
     if (dest_step_pos == mm_act->curr_step_pos)
         return 0;
 
-    mm_act->params->act_snsr_ops->get_damping_params(dest_step_pos,
-            mm_act->curr_step_pos, num_steps, sign_dir, &damping_params);
+    damping_params = (struct damping_params_t *)calloc(
+            1, sizeof(struct damping_params_t) * region_size);
+    if (!damping_params)
+        return -ENOMEM;
+
+    for (region_idx = 0; region_idx < region_size; region_idx++)
+        mm_act->params->act_snsr_ops->get_damping_params(dest_step_pos,
+                mm_act->curr_step_pos, sign_dir, &damping_params[region_idx]);
 
     cdata.cfgtype = CFG_MOVE_FOCUS;
     cdata.cfg.move.dir = dir;
     cdata.cfg.move.sign_dir = sign_dir;
     cdata.cfg.move.dest_step_pos = dest_step_pos;
     cdata.cfg.move.num_steps = num_steps;
-    cdata.cfg.move.ringing_params = &damping_params;
+    cdata.cfg.move.ringing_params = damping_params;
 
     rc = ioctl(mm_act->fd, VIDIOC_MSM_ACTUATOR_CFG, &cdata);
     if (rc == 0)
         mm_act->curr_step_pos = dest_step_pos;
 
+    free(damping_params);
     return rc;
 }
 

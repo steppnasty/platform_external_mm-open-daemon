@@ -99,8 +99,7 @@ struct csic_cfg_data {
 
 struct mm_daemon_act_snsr_ops {
     void (*get_damping_params)(uint16_t dest_step_pos, uint16_t curr_step_pos,
-        int32_t num_steps, int sign_dir,
-        struct damping_params_t *damping_params);
+        int sign_dir, struct damping_params_t *damping_params);
 };
 
 struct mm_daemon_act_params {

@@ -37,7 +37,7 @@ struct s5k4e1gx_pdata {
     uint16_t gain;
 };
 
-static uint16_t s5k4e1gx_pos_tbl[] = {
+static uint16_t s5k4e1gx_act_pos_tbl[] = {
     0, 40, 80, 120, 140, 160, 172, 184, 196, 208, 220, 232, 244,
     256, 268, 280, 292, 304, 316, 328, 340, 352, 364, 376, 388,
     400, 412, 424, 436, 448, 460, 472, 484, 496, 508, 520, 532,
@@ -224,19 +224,21 @@ static int s5k4e1gx_exp_gain(mm_sensor_cfg_t *cfg, uint16_t gain)
 }
 
 static void s5k4e1gx_get_damping_params(uint16_t dest_step_pos,
-        uint16_t curr_step_pos, int32_t num_steps, int sign_dir,
+        uint16_t curr_step_pos, int sign_dir,
         struct damping_params_t *damping_params)
 {
     uint16_t damping_code_step;
     uint16_t target_dist;
-    uint16_t dest_lens_pos = s5k4e1gx_pos_tbl[dest_step_pos];
-    uint16_t curr_lens_pos = s5k4e1gx_pos_tbl[curr_step_pos];
+    uint16_t dest_lens_pos = s5k4e1gx_act_pos_tbl[dest_step_pos];
+    uint16_t curr_lens_pos = s5k4e1gx_act_pos_tbl[curr_step_pos];
     uint16_t time_wait_per_step;
     uint32_t sw_damping_step_dynamic;
     uint32_t sw_damping_time_wait;
     uint32_t hw_params;
+    int32_t num_steps;
     int32_t time_wait;
 
+    num_steps = sign_dir * (dest_step_pos - curr_step_pos);
     target_dist = sign_dir * (dest_lens_pos - curr_lens_pos);
 
     if (num_steps > 2) {
@@ -247,7 +249,7 @@ static void s5k4e1gx_get_damping_params(uint16_t dest_step_pos,
         sw_damping_time_wait = 2;
     }
 
-    if (sign_dir < 0 && (target_dist >= s5k4e1gx_pos_tbl[DAMPING_THRESHOLD])) {
+    if (sign_dir < 0 && (target_dist >= s5k4e1gx_act_pos_tbl[DAMPING_THRESHOLD])) {
         sw_damping_step_dynamic = SW_DAMPING_STEP;
         sw_damping_time_wait = 1;
         time_wait = 1000000 / S5K4E1GX_MAX_FPS - SW_DAMPING_STEP *
