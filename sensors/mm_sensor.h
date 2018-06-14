@@ -52,7 +52,7 @@ struct mm_sensor_ops {
     int (*contrast)(struct mm_sensor_cfg *cfg, int value);
     int (*effect)(struct mm_sensor_cfg *cfg, int mode);
     int (*sharpness)(struct mm_sensor_cfg *cfg, int value);
-    int (*exp_gain)(struct mm_sensor_cfg *cfg, uint16_t gain);
+    int (*exp_gain)(struct mm_sensor_cfg *cfg, uint16_t gain, uint16_t line);
 };
 
 typedef struct mm_sensor_cfg {

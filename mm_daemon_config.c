@@ -100,16 +100,16 @@ static uint32_t mm_daemon_config_v4l2_fmt(cam_format_t fmt)
 
 static void mm_daemon_config_parm_flash(mm_daemon_cfg_t *cfg_obj, int32_t mode)
 {
+    mm_daemon_thread_info *led = cfg_obj->info[LED_DEV];
     enum msm_camera_led_config_t fl = MSM_CAMERA_LED_OFF;
 
-    if (!cfg_obj->info[LED_DEV] || mode != CAM_FLASH_MODE_OFF ||
-            mode != CAM_FLASH_MODE_TORCH)
+    if (!led || mode != CAM_FLASH_MODE_OFF || mode != CAM_FLASH_MODE_TORCH)
         return;
 
     if (mode == CAM_FLASH_MODE_TORCH)
         fl = MSM_CAMERA_LED_TORCH;
 
-    mm_daemon_util_subdev_cmd(cfg_obj->info[LED_DEV], LED_CMD_CONTROL, fl, FALSE);
+    mm_daemon_util_subdev_cmd(led, LED_CMD_CONTROL, fl, FALSE);
 }
 
 static void mm_daemon_config_parm(mm_daemon_cfg_t *cfg_obj)
@@ -2774,15 +2774,35 @@ static void mm_daemon_config_stats(mm_daemon_cfg_t *cfg_obj, uint16_t req_stats,
         cfg_obj->enabled_stats &= ~stats;
 }
 
-static void mm_daemon_config_exp_gain(mm_daemon_cfg_t *cfg_obj, uint16_t gain)
+static int mm_daemon_config_exp_gain(mm_daemon_cfg_t *cfg_obj, uint16_t gain,
+        uint16_t line, uint8_t wait)
 {
+    uint32_t val = gain | (line << 16);
+
+    if (line == cfg_obj->ae.c_line && gain == cfg_obj->ae.c_gain)
+        return 1;
+
     mm_daemon_util_subdev_cmd(cfg_obj->info[SNSR_DEV],
-            SENSOR_CMD_EXP_GAIN, gain, FALSE);
-    cfg_obj->ae.curr_gain = gain;
+            SENSOR_CMD_EXP_GAIN, val, wait);
+    cfg_obj->ae.c_gain = gain;
+    cfg_obj->ae.c_line = line;
+
+    return 0;
+}
+
+static void mm_daemon_config_prepare_snapshot(mm_daemon_cfg_t *cfg_obj)
+{
+    if (!cfg_obj->info[LED_DEV])
+        return;
+
+    cfg_obj->prep_snapshot = 1;
+    mm_daemon_util_subdev_cmd(cfg_obj->info[LED_DEV],
+            LED_CMD_CONTROL, MSM_CAMERA_LED_LOW, FALSE);
 }
 
 static int mm_daemon_config_start_preview(mm_daemon_cfg_t *cfg_obj)
 {
+    struct mm_sensor_aec_config *aec_cfg = cfg_obj->sdata->aec_cfg;
     cam_stream_type_t stream_type = CAM_STREAM_TYPE_PREVIEW;
     mm_daemon_buf_info *buf = mm_daemon_get_stream_buf(cfg_obj, stream_type);
 
@@ -2795,7 +2815,10 @@ static int mm_daemon_config_start_preview(mm_daemon_cfg_t *cfg_obj)
 
     mm_daemon_util_subdev_cmd(cfg_obj->info[SNSR_DEV],
             SENSOR_CMD_PREVIEW, 0, TRUE);
-    mm_daemon_config_exp_gain(cfg_obj, cfg_obj->ae.curr_gain);
+
+    if (aec_cfg)
+        mm_daemon_config_exp_gain(cfg_obj, aec_cfg->default_gain,
+                aec_cfg->default_line[PREVIEW], FALSE);
 
     mm_daemon_util_subdev_cmd(cfg_obj->info[ACT_DEV],
             ACT_CMD_INIT_FOCUS, 0, FALSE);
@@ -2843,24 +2866,18 @@ static void mm_daemon_config_stop_preview(mm_daemon_cfg_t *cfg_obj)
     mm_daemon_config_vfe_stop(cfg_obj);
 }
 
-static void mm_daemon_config_prepare_snapshot(mm_daemon_cfg_t *cfg_obj)
-{
-    if (!cfg_obj->info[LED_DEV])
-        return;
-
-    cfg_obj->prep_snapshot = 1;
-    mm_daemon_util_subdev_cmd(cfg_obj->info[LED_DEV],
-            LED_CMD_CONTROL, MSM_CAMERA_LED_LOW, FALSE);
-}
-
 static int mm_daemon_config_start_snapshot(mm_daemon_cfg_t *cfg_obj)
 {
+    struct mm_sensor_aec_config *aec_cfg = cfg_obj->sdata->aec_cfg;
     cam_stream_type_t stream_type = CAM_STREAM_TYPE_SNAPSHOT;
 
     mm_daemon_util_subdev_cmd(cfg_obj->info[SNSR_DEV],
             SENSOR_CMD_SNAPSHOT, 0, TRUE);
-    if (cfg_obj->prep_snapshot)
-        mm_daemon_config_exp_gain(cfg_obj, cfg_obj->ae.curr_gain / 4);
+
+    if (cfg_obj->prep_snapshot && aec_cfg)
+        mm_daemon_config_exp_gain(cfg_obj, aec_cfg->gain_min,
+                aec_cfg->default_line[SNAPSHOT], TRUE);
+
     mm_daemon_config_vfe_roll_off(cfg_obj, stream_type);
     mm_daemon_config_vfe_fov(cfg_obj, stream_type);
     mm_daemon_config_vfe_main_scaler(cfg_obj, stream_type);
@@ -3127,18 +3144,19 @@ static void mm_daemon_config_auto_exposure(mm_daemon_cfg_t *cfg_obj,
     int mode;
     int32_t led_mode;
     int32_t stat_val = 0;
-    int16_t ae_adj = 0;
-    uint16_t gain = 0;
-    uint16_t gain_min, gain_max;
-    uint16_t threshold = 4000;
+    int16_t gain_adj = 0;
+    int16_t line_adj = 0;
+    uint16_t gain = cfg_obj->ae.c_gain;
+    uint16_t line = cfg_obj->ae.c_line;
+    uint16_t max_line_adj = 100;
     uint8_t flash_needed = FALSE;
-    uint8_t ae_stable = FALSE;
-    uint8_t frame_wait_count = 10;
     uint16_t work_buf[256];
+    struct mm_sensor_aec_config *aec_cfg = cfg_obj->sdata->aec_cfg;
     mm_daemon_stats_buf_info *stat = cfg_obj->stats_buf[MSM_ISP_STATS_AEC];
 
     if (cfg_obj->info[SNSR_DEV]->state != STATE_POLL ||
-            mm_daemon_config_get_parm(cfg_obj, CAM_INTF_PARM_AEC_LOCK))
+            mm_daemon_config_get_parm(cfg_obj, CAM_INTF_PARM_AEC_LOCK) ||
+            !aec_cfg)
         return;
 
     if (mm_daemon_config_streaming(cfg_obj, SB(SNAPSHOT)|SB(POSTVIEW)))
@@ -3146,8 +3164,6 @@ static void mm_daemon_config_auto_exposure(mm_daemon_cfg_t *cfg_obj,
     else
         mode = PREVIEW;
 
-    gain_max = cfg_obj->sdata->gain_max;
-    gain_min = cfg_obj->sdata->gain_min;
     led_mode = mm_daemon_config_get_parm(cfg_obj,
             CAM_INTF_PARM_LED_MODE);
 
@@ -3157,41 +3173,68 @@ static void mm_daemon_config_auto_exposure(mm_daemon_cfg_t *cfg_obj,
         stat_val += work_buf[i];
     stat_val /= i;
 
-    if (cfg_obj->ae.frm_cnt < frame_wait_count) {
-        cfg_obj->ae.frm_cnt++;
-        return;
-    } else
-        cfg_obj->ae.frm_cnt = 0;
+    if (stat_val < (aec_cfg->target - 1000) ||
+            stat_val > (aec_cfg->target + 1000)) {
+        gain_adj = (int32_t)(aec_cfg->target - stat_val) / 100;
+        if ((gain_adj > 0 && gain == aec_cfg->gain_max) ||
+                (gain_adj < 0 && gain == aec_cfg->gain_min) ||
+                (line != aec_cfg->default_line[mode])) {
+            line_adj = gain_adj * aec_cfg->line_mult;
+            if (line_adj > max_line_adj)
+                line_adj = max_line_adj;
+            else if (line_adj < max_line_adj * -1)
+                line_adj = max_line_adj * -1;
+            gain_adj = 0;
+            if (cfg_obj->ae.frm_cnt < aec_cfg->frm_wait) {
+                cfg_obj->ae.frm_cnt++;
+                return;
+            } else {
+                cfg_obj->ae.frm_cnt = 0;
+            }
+        }
 
-    if (stat_val > (threshold - 1000) && stat_val < (threshold + 1000))
-        ae_adj = 0;
-    else
-        ae_adj = (int32_t)(threshold - stat_val) / 100;
-
-    if ((ae_adj > 0 && cfg_obj->ae.curr_gain == gain_max) ||
-            (ae_adj < 0 && cfg_obj->ae.curr_gain == gain_min))
-        ae_adj = 0;
-
-    if (ae_adj == 0) {
-        ae_stable = TRUE;
-        if (led_mode == CAM_FLASH_MODE_AUTO)
-            flash_needed = TRUE;
-    } else {
-        if (cfg_obj->ae.curr_gain + ae_adj < gain_min)
-            gain = gain_min;
-        else if (cfg_obj->ae.curr_gain + ae_adj > gain_max)
-            gain = gain_max;
-        else
-            gain = cfg_obj->ae.curr_gain + ae_adj;
+        if (line_adj) {
+            if ((line > aec_cfg->default_line[mode] && line +
+                    line_adj < aec_cfg->default_line[mode]) ||
+                    (line < aec_cfg->default_line[mode] &&
+                    line + line_adj > aec_cfg->default_line[mode]))
+                line = aec_cfg->default_line[mode];
+            else if (line + line_adj < aec_cfg->line_min)
+                line = aec_cfg->line_min;
+            else if (line + line_adj > aec_cfg->line_max)
+                line = aec_cfg->line_max;
+            else
+                line += line_adj;
+        } else {
+            if (line == aec_cfg->default_line[mode]) {
+                if (gain + gain_adj < aec_cfg->gain_min)
+                    gain = aec_cfg->gain_min;
+                else if (gain + gain_adj > aec_cfg->gain_max)
+                    gain = aec_cfg->gain_max;
+                else
+                    gain += gain_adj;
+            } else if (line > aec_cfg->default_line[mode]) {
+                if (line + line_adj < aec_cfg->default_line[mode])
+                    line = aec_cfg->default_line[mode];
+                else
+                    line += line_adj;
+            } else {
+                if (line + line_adj > aec_cfg->default_line[mode])
+                    line = aec_cfg->default_line[mode];
+                else
+                    line += line_adj;
+            }
+        }
     }
 
-    if (ae_stable) {
+    if (gain >= aec_cfg->flash_threshold && led_mode == CAM_FLASH_MODE_AUTO)
+        flash_needed = TRUE;
+
+    if (mm_daemon_config_exp_gain(cfg_obj, gain, line, FALSE)) {
         if (cfg_obj->prep_snapshot)
             cfg_obj->ae.meta.is_prep_snapshot_done_valid = TRUE;
-    } else
-        mm_daemon_config_exp_gain(cfg_obj, gain);
+    }
 
-    cfg_obj->ae.stable = ae_stable;
     cfg_obj->ae.flash_needed = flash_needed;
     cfg_obj->ae.meta.is_ae_params_valid = TRUE;
 }
@@ -3730,8 +3773,6 @@ static void *mm_daemon_config_thread(void *data)
 
     for (i = 0; i < ARRAY_SIZE(isp_events); i++)
         mm_daemon_config_subscribe(cfg_obj, isp_events[i], 1);
-
-    cfg_obj->ae.curr_gain = DEFAULT_EXP_GAIN;
 
     /* ION */
     cfg_obj->ion_fd = open("/dev/ion", O_RDONLY);

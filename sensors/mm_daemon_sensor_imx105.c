@@ -26,6 +26,10 @@
 #define IMX105_TOTAL_STEPS 42
 #define DAMPING_THRESHOLD 10
 #define IMX105_OFFSET 5
+#define IMX105_MAX_ANALOG_GAIN 224
+#define IMX105_MIN_ANALOG_GAIN 0
+#define IMX105_MAX_DIGITAL_GAIN 384
+#define IMX105_MIN_DIGIATL_GAIN 256
 #define MSB(word) (word & 0xFF00) >> 8
 #define LSB(word) (word & 0x00FF)
 
@@ -201,29 +205,28 @@ static int imx105_stream_stop(mm_sensor_cfg_t *cfg)
     return cfg->ops->i2c_write(cfg->mm_snsr, 0x0100, 0x00, dt);
 }
 
-static int imx105_exp_gain(mm_sensor_cfg_t *cfg, uint16_t again)
+static int imx105_exp_gain(mm_sensor_cfg_t *cfg, uint16_t gain, uint16_t line)
 {
     int rc = 0;
     struct imx105_pdata *pdata = (struct imx105_pdata *)cfg->pdata;
-    enum msm_camera_i2c_data_type dt = MSM_CAMERA_I2C_BYTE_DATA;
-    uint16_t max_legal_again = 0xE0;
-    uint16_t max_legal_dgain = 0x200;
-    uint16_t dgain;
-    uint32_t line;
+    uint16_t max_line_val = 2398;
+    uint16_t dgain = IMX105_MIN_DIGITAL_GAIN;
+    uint16_t again = gain;
+    uint32_t line_val = line;
     uint32_t fl_lines;
 
-    line = pdata->line;
-    dgain = pdata->dgain;
+    if (again > IMX105_MAX_ANALOG_GAIN) {
+        dgain += again - IMX105_MAX_ANALOG_GAIN;
+        again = IMX105_MAX_ANALOG_GAIN;
+    }
+    if (dgain > IMX105_MAX_DIGITAL_GAIN)
+        dgain = IMX105_MAX_DIGITAL_GAIN;
+
     fl_lines = cfg->data->attr[pdata->mode]->h +
             cfg->data->attr[pdata->mode]->blk_l;
 
-    if (line > (fl_lines - IMX105_OFFSET))
-        fl_lines = line + IMX105_OFFSET;
-
-    if (again > max_legal_again)
-        again = max_legal_again;
-    if (dgain > max_legal_dgain)
-        dgain = max_legal_dgain;
+    if (line_val > (fl_lines - IMX105_OFFSET))
+        fl_lines = line_val + IMX105_OFFSET;
 
     {
         struct msm_camera_i2c_reg_array exp_settings[] = {
@@ -240,15 +243,16 @@ static int imx105_exp_gain(mm_sensor_cfg_t *cfg, uint16_t again)
             {0x0215, LSB(dgain), 0},
             {0x0340, MSB(fl_lines), 0},
             {0x0341, LSB(fl_lines), 0},
-            {0x0202, MSB(line), 0},
-            {0x0203, LSB(line), 0},
+            {0x0202, MSB(line_val), 0},
+            {0x0203, LSB(line_val), 0},
             {0x0104, 0x00, 0},
         };
 
         rc = cfg->ops->i2c_write_array(cfg->mm_snsr,
-                &exp_settings[0], ARRAY_SIZE(exp_settings), dt);
+                &exp_settings[0], ARRAY_SIZE(exp_settings),
+                MSM_CAMERA_I2C_BYTE_DATA);
     }
-    pdata->line = line;
+    pdata->line = line_val;
     pdata->again = again;
     pdata->dgain = dgain;
     return rc;
@@ -310,8 +314,6 @@ static int imx105_preview(mm_sensor_cfg_t *cfg)
     int rc = -1;
 
     pdata->mode = PREVIEW;
-    pdata->line = 2600;
-    pdata->dgain = 0x100;
 
     return cfg->ops->i2c_write_array(cfg->mm_snsr,
             &imx105_prev_tbl[0],
@@ -445,6 +447,19 @@ static struct mm_sensor_stream_attr imx105_attr_snapshot = {
     .blk_p = 256,
 };
 
+static struct mm_sensor_aec_config imx105_aec_cfg = {
+    .gain_min = 0,
+    .gain_max = 352,
+    .line_min = 190,
+    .line_max = 3729,
+    .default_gain = 2,
+    .default_line = { 2600, 2600, 2597 },
+    .line_mult = 10,
+    .frm_wait = 0,
+    .target = 5000,
+    .flash_threshold = 224,
+};
+
 /* MIPI CSI Controller config */
 static struct msm_camera_csic_params imx105_csic_params = {
     .data_format = CSIC_10BIT,
@@ -521,12 +536,11 @@ static struct mm_daemon_act_params imx105_act_params = {
 static struct mm_sensor_data imx105_data = {
     .attr[PREVIEW] = &imx105_attr_preview,
     .attr[SNAPSHOT] = &imx105_attr_snapshot,
+    .aec_cfg = &imx105_aec_cfg,
     .csi_params = (void *)&imx105_csic_params,
     .act_params = (void *)&imx105_act_params,
     .csi_dev = 0,
     .cap = &imx105_capabilities,
-    .gain_min = 0,
-    .gain_max = 0x200,
     .vfe_module_cfg = 0x1F27C17,
     .vfe_clk_rate = 266667000,
     .vfe_cfg_off = 0x0200,

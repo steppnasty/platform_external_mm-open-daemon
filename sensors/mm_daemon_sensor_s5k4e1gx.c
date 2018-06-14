@@ -157,7 +157,7 @@ static int s5k4e1gx_stream_stop(mm_sensor_cfg_t *cfg)
     return cfg->ops->i2c_write(cfg->mm_snsr, 0x0100, 0x00, dt);
 }
 
-static int s5k4e1gx_exp_gain(mm_sensor_cfg_t *cfg, uint16_t gain)
+static int s5k4e1gx_exp_gain(mm_sensor_cfg_t *cfg, uint16_t gain, uint16_t line)
 {
     int rc = 0;
     struct s5k4e1gx_pdata *pdata = (struct s5k4e1gx_pdata *)cfg->pdata;
@@ -166,7 +166,7 @@ static int s5k4e1gx_exp_gain(mm_sensor_cfg_t *cfg, uint16_t gain)
     uint16_t max_legal_gain = 0x200;
     uint16_t min_line;
     uint16_t max_line;
-    uint32_t line;
+    uint32_t line_val = line;
     uint32_t ll_ratio;
     uint32_t fl_lines;
     uint32_t ll_pck = 2738;
@@ -175,32 +175,14 @@ static int s5k4e1gx_exp_gain(mm_sensor_cfg_t *cfg, uint16_t gain)
     max_line = cfg->data->attr[pdata->mode]->h;
     fl_lines = max_line + cfg->data->attr[pdata->mode]->blk_l;
 
-    if (gain < 0x30 && pdata->line > 0x40) {
-        line = (pdata->line/2);
-    } else if ((gain > 0xa0) && (pdata->line < max_line)) {
-        if ((pdata->line * 2) > max_line)
-            line = cfg->data->attr[pdata->mode]->h;
-        else
-            line = pdata->line * 2;
-    } else
-        line = pdata->line;
+    line_val *= 0x400;
 
-    if (gain > max_legal_gain)
-        gain = max_legal_gain;
-    else if (gain < min_legal_gain)
-        gain = min_legal_gain;
-
-    line = (line * 0x400);
-
-    if (fl_lines < (line / 0x400))
-        ll_ratio = (line / (fl_lines - offset));
+    if (fl_lines < (line_val / 0x400))
+        ll_ratio = (line_val / (fl_lines - offset));
     else
         ll_ratio = 0x400;
     ll_pck = ll_pck * ll_ratio;
-    line = line / ll_ratio;
-
-    if (line == pdata->line && gain == pdata->gain)
-        return rc;
+    line_val /= ll_ratio;
 
     {
         struct msm_camera_i2c_reg_array exp_settings[] = {
@@ -209,15 +191,15 @@ static int s5k4e1gx_exp_gain(mm_sensor_cfg_t *cfg, uint16_t gain)
             {0x0205, LSB(gain), 0},
             {0x0342, MSB(ll_pck / 0x400), 0},
             {0x0343, LSB(ll_pck / 0x400), 0},
-            {0x0202, MSB(line), 0},
-            {0x0203, LSB(line), 0},
+            {0x0202, MSB(line_val), 0},
+            {0x0203, LSB(line_val), 0},
             s5k4e1gx_groupoff_settings[0],
         };
 
         rc = cfg->ops->i2c_write_array(cfg->mm_snsr,
                 &exp_settings[0], ARRAY_SIZE(exp_settings), dt);
     }
-    pdata->line = line;
+    pdata->line = line_val;
     pdata->gain = gain;
 
     return rc;
@@ -326,7 +308,7 @@ static int s5k4e1gx_preview(mm_sensor_cfg_t *cfg)
             &s5k4e1gx_prev_settings[0],
             ARRAY_SIZE(s5k4e1gx_prev_settings), dt);
     s5k4e1gx_stream_start(cfg);
-    pdata->line = 980;
+
     return rc;
 }
 
@@ -342,7 +324,7 @@ static int s5k4e1gx_snapshot(mm_sensor_cfg_t *cfg)
             &s5k4e1gx_snap_settings[0],
             ARRAY_SIZE(s5k4e1gx_snap_settings), dt);
     s5k4e1gx_stream_start(cfg);
-    pdata->line = 1960;
+
     return rc;
 }
 
@@ -487,6 +469,19 @@ static struct mm_sensor_stream_attr s5k4e1gx_attr_snapshot = {
     .blk_p = 130,
 };
 
+static struct mm_sensor_aec_config s5k4e1gx_aec_cfg = {
+    .gain_min = 32,
+    .gain_max = 512,
+    .line_min = 50,
+    .line_max = 1960,
+    .default_gain = 32,
+    .default_line = { 980, 980, 1960},
+    .line_mult = 1,
+    .frm_wait = 2,
+    .target = 4000,
+    .flash_threshold = 512,
+};
+
 /* MIPI CSI Controller config */
 static struct msm_camera_csic_params s5k4e1gx_csic_params = {
     .data_format = CSIC_10BIT,
@@ -556,11 +551,10 @@ static struct mm_daemon_act_params s5k4e1gx_act_params = {
 static struct mm_sensor_data s5k4e1gx_data = {
     .attr[PREVIEW] = &s5k4e1gx_attr_preview,
     .attr[SNAPSHOT] = &s5k4e1gx_attr_snapshot,
+    .aec_cfg = &s5k4e1gx_aec_cfg,
     .csi_params = (void *)&s5k4e1gx_csic_params,
     .act_params = (void *)&s5k4e1gx_act_params,
     .cap = &s5k4e1gx_capabilities,
-    .gain_min = 0x20,
-    .gain_max = 0x200,
     .vfe_module_cfg = 0x1E27C17,
     .vfe_clk_rate = 122880000,
     .vfe_cfg_off = 0x0211,

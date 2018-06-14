@@ -193,7 +193,8 @@ static int mm_daemon_sensor_execute_cmd(mm_daemon_thread_info *info,
         break;
     case SENSOR_CMD_EXP_GAIN:
         if (mm_snsr->cfg->ops->exp_gain)
-            rc = mm_snsr->cfg->ops->exp_gain(mm_snsr->cfg, val);
+            rc = mm_snsr->cfg->ops->exp_gain(mm_snsr->cfg,
+                    (val & 0xFFFF), (val >> 16));
         break;
     case SENSOR_CMD_AB:
         if (mm_snsr->cfg->ops->ab)

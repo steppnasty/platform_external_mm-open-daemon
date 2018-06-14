@@ -213,10 +213,9 @@ struct mm_daemon_ae_metadata {
 
 struct mm_daemon_ae_info {
     struct mm_daemon_ae_metadata meta;
-    int32_t curr_gain;
-    int32_t curr_line;
+    uint16_t c_gain;
+    uint16_t c_line;
     uint8_t flash_needed;
-    uint8_t stable;
     uint8_t frm_cnt;
 };
 

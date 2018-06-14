@@ -26,8 +26,6 @@
 #include "mm_daemon.h"
 #include "sensors/mm_sensor.h"
 
-#define DEFAULT_EXP_GAIN 0x20
-
 typedef enum {
     SENSOR_CMD_SHUTDOWN,
     SENSOR_CMD_PREVIEW,
