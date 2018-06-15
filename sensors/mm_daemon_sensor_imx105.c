@@ -461,7 +461,7 @@ static struct mm_sensor_aec_config imx105_aec_cfg = {
     .default_gain = 2,
     .default_line = { 2600, 2600, 2597 },
     .line_mult = 10,
-    .frm_wait = 0,
+    .frame_skip = 1,
     .target = 5000,
     .flash_threshold = 224,
 };

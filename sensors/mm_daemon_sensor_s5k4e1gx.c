@@ -477,7 +477,7 @@ static struct mm_sensor_aec_config s5k4e1gx_aec_cfg = {
     .default_gain = 32,
     .default_line = { 980, 980, 1960},
     .line_mult = 1,
-    .frm_wait = 2,
+    .frame_skip = 2,
     .target = 4000,
     .flash_threshold = 512,
 };

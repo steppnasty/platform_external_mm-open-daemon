@@ -3148,6 +3148,12 @@ static void mm_daemon_config_auto_exposure(mm_daemon_cfg_t *cfg_obj,
         stat_val += work_buf[i];
     stat_val /= i;
 
+    if (cfg_obj->ae.frm_cnt < aec_cfg->frame_skip) {
+        cfg_obj->ae.frm_cnt++;
+        return;
+    } else
+        cfg_obj->ae.frm_cnt = 0;
+
     if (stat_val < (aec_cfg->target - 1000) ||
             stat_val > (aec_cfg->target + 1000)) {
         gain_adj = (int32_t)(aec_cfg->target - stat_val) / 100;
@@ -3160,12 +3166,6 @@ static void mm_daemon_config_auto_exposure(mm_daemon_cfg_t *cfg_obj,
             else if (line_adj < max_line_adj * -1)
                 line_adj = max_line_adj * -1;
             gain_adj = 0;
-            if (cfg_obj->ae.frm_cnt < aec_cfg->frm_wait) {
-                cfg_obj->ae.frm_cnt++;
-                return;
-            } else {
-                cfg_obj->ae.frm_cnt = 0;
-            }
         }
 
         if (line_adj) {
