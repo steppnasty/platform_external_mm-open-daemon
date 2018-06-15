@@ -67,9 +67,16 @@ struct mm_sensor_aec_config {
     uint16_t flash_threshold;
 };
 
+struct mm_sensor_awb_config {
+    uint32_t dmx_wb1[CAM_WB_MODE_MAX];
+    uint32_t dmx_wb2[CAM_WB_MODE_MAX];
+    uint32_t wb[CAM_WB_MODE_MAX];
+};
+
 struct mm_sensor_data {
     struct mm_sensor_stream_attr *attr[STREAM_TYPE_MAX];
     struct mm_sensor_aec_config *aec_cfg;
+    struct mm_sensor_awb_config *awb_cfg[STREAM_TYPE_MAX];
     void *csi_params;
     void *act_params;
     cam_capability_t *cap;

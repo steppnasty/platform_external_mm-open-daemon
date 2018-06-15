@@ -1823,8 +1823,9 @@ static int mm_daemon_config_vfe_asf(mm_daemon_cfg_t *cfg_obj,
 static int mm_daemon_config_vfe_white_balance(mm_daemon_cfg_t *cfg_obj)
 {
     int rc = 0;
-    int32_t wb;
-    uint32_t wb_cfg;
+    int32_t wb_mode;
+    uint32_t wb_reg;
+    struct mm_sensor_awb_config *awb_cfg;
     struct msm_vfe_reg_cfg_cmd reg_cfg_cmd[] = {
         {
             .u.rw_info = {
@@ -1835,31 +1836,21 @@ static int mm_daemon_config_vfe_white_balance(mm_daemon_cfg_t *cfg_obj)
         },
     };
 
-    if (cfg_obj->sdata->uses_sensor_ctrls)
+    if (mm_daemon_config_streaming(cfg_obj, SB(SNAPSHOT)|SB(POSTVIEW)))
+        awb_cfg = cfg_obj->sdata->awb_cfg[SNAPSHOT];
+    else
+        awb_cfg = cfg_obj->sdata->awb_cfg[PREVIEW];
+
+    if (!awb_cfg)
         return 0;
 
-    if (mm_daemon_config_streaming(cfg_obj, SB(SNAPSHOT)|SB(POSTVIEW)))
-        wb_cfg = 0x02010080;
-    else {
-        wb = mm_daemon_config_get_parm(cfg_obj, CAM_INTF_PARM_WHITE_BALANCE);
-        switch(wb) {
-        case CAM_WB_MODE_INCANDESCENT:
-            wb_cfg = 0x272928E;
-            break;
-        case CAM_WB_MODE_DAYLIGHT:
-            wb_cfg = 0x389728D;
-            break;
-        case CAM_WB_MODE_AUTO:
-            wb_cfg = 0x33E5A8D;
-            break;
-        case CAM_WB_MODE_FLUORESCENT:
-        default:
-            wb_cfg = 0x33E5A8D;
-            break;
-        }
-    }
+    wb_mode = mm_daemon_config_get_parm(cfg_obj, CAM_INTF_PARM_WHITE_BALANCE);
 
-    rc = mm_daemon_config_vfe_reg_cmd(cfg_obj, 4, (void *)&wb_cfg,
+    wb_reg = awb_cfg->wb[wb_mode];
+    if (!wb_reg)
+        wb_reg = awb_cfg->wb[0];
+
+    rc = mm_daemon_config_vfe_reg_cmd(cfg_obj, 4, (void *)&wb_reg,
             (void *)&reg_cfg_cmd, ARRAY_SIZE(reg_cfg_cmd));
     return rc;
 }
@@ -2057,16 +2048,12 @@ static int mm_daemon_config_vfe_camif(mm_daemon_cfg_t *cfg_obj,
     return rc;
 }
 
-static int mm_daemon_config_vfe_demux(mm_daemon_cfg_t *cfg_obj,
-        cam_stream_type_t stream_type)
+static int mm_daemon_config_vfe_demux(mm_daemon_cfg_t *cfg_obj)
 {
     int rc = 0;
-    int32_t *wb_parm;
-    struct mm_sensor_stream_attr *sattr;
-    mm_daemon_buf_info *buf;
-    cam_dimension_t dim;
+    int32_t wb_mode;
     uint32_t *demux_cfg, *p;
-    uint32_t wb1, wb2, dmx1, dmx2;
+    struct mm_sensor_awb_config *awb_cfg;
     struct msm_vfe_reg_cfg_cmd reg_cfg_cmd[] = {
         {
             .u.rw_info = {
@@ -2077,54 +2064,38 @@ static int mm_daemon_config_vfe_demux(mm_daemon_cfg_t *cfg_obj,
         },
     };
 
-    buf = mm_daemon_get_stream_buf(cfg_obj, stream_type);
-    if (!buf)
-        return -ENOMEM;
-    dim = buf->stream_info->dim;
-    if (stream_type == CAM_STREAM_TYPE_SNAPSHOT)
-        sattr = cfg_obj->sdata->attr[SNAPSHOT];
+    wb_mode = mm_daemon_config_get_parm(cfg_obj, CAM_INTF_PARM_WHITE_BALANCE);
+    if (mm_daemon_config_streaming(cfg_obj, SB(SNAPSHOT)|SB(POSTVIEW)))
+        awb_cfg = cfg_obj->sdata->awb_cfg[SNAPSHOT];
     else
-        sattr = cfg_obj->sdata->attr[PREVIEW];
+        awb_cfg = cfg_obj->sdata->awb_cfg[PREVIEW];
+
 
     demux_cfg = (uint32_t *)malloc(20);
     p = demux_cfg;
-    wb1 = wb2 = 0x800080;
-    if (!cfg_obj->sdata->vfe_dmux_cfg) {
+    if (!cfg_obj->sdata->vfe_dmux_cfg || !awb_cfg) {
         *p++ = 0x3;
-        dmx1 = dmx2 = 0x9CAC;
+        *p++ = 0x9CAC;
+        *p++ = 0x9CAC;
+        *p++ = 0x800080;
+        *p = 0x800080;
     } else {
         *p++ = 0x1;
-        dmx1 = ((cfg_obj->sdata->vfe_dmux_cfg & 0xFF00) >> 8);
-        dmx2 = (cfg_obj->sdata->vfe_dmux_cfg & 0x00FF);
-        if (stream_type == CAM_STREAM_TYPE_SNAPSHOT) {
-            wb_parm = (int32_t *)POINTER_OF(CAM_INTF_PARM_WHITE_BALANCE,
-                    cfg_obj->parm_buf.cfg_buf);
-            switch(*wb_parm) {
-                case CAM_WB_MODE_INCANDESCENT:
-                    wb1 = 0x8D008D;
-                    wb2 = 0xE200B9;
-                    break;
-                case CAM_WB_MODE_DAYLIGHT:
-                    wb1 = 0x8D008D;
-                    wb2 = 0xCF012D;
-                    break;
-                case CAM_WB_MODE_FLUORESCENT:
-                case CAM_WB_MODE_AUTO:
-                default:
-                    wb1 = 0x8E008E;
-                    wb2 = 0xC90149;
-                    break;
-            }
+        if (!awb_cfg->dmx_wb1[wb_mode] || !awb_cfg->dmx_wb2[wb_mode]) {
+            *p++ = awb_cfg->dmx_wb1[0];
+            *p++ = awb_cfg->dmx_wb2[0];
+        } else {
+            *p++ = awb_cfg->dmx_wb1[wb_mode];
+            *p++ = awb_cfg->dmx_wb2[wb_mode];
         }
+        *p++ = ((cfg_obj->sdata->vfe_dmux_cfg & 0xFF00) >> 8);
+        *p = (cfg_obj->sdata->vfe_dmux_cfg & 0x00FF);
     }
-    *p++ = wb1;
-    *p++ = wb2;
-    *p++ = dmx1;
-    *p = dmx2;
 
     rc = mm_daemon_config_vfe_reg_cmd(cfg_obj, 20, (void *)demux_cfg,
             (void *)&reg_cfg_cmd, ARRAY_SIZE(reg_cfg_cmd));
     free(demux_cfg);
+
     return rc;
 }
 
@@ -2843,7 +2814,7 @@ static int mm_daemon_config_start_preview(mm_daemon_cfg_t *cfg_obj)
     mm_daemon_config_vfe_rgb_gamma_chbank(cfg_obj, 6);
     mm_daemon_config_vfe_rgb_gamma_chbank(cfg_obj, 12);
     mm_daemon_config_vfe_camif(cfg_obj, stream_type);
-    mm_daemon_config_vfe_demux(cfg_obj, stream_type);
+    mm_daemon_config_vfe_demux(cfg_obj);
     mm_daemon_config_vfe_out_clamp(cfg_obj);
     mm_daemon_config_vfe_frame_skip(cfg_obj);
     mm_daemon_config_vfe_chroma_subs(cfg_obj);
@@ -2900,7 +2871,7 @@ static int mm_daemon_config_start_snapshot(mm_daemon_cfg_t *cfg_obj)
         cfg_obj->prep_snapshot = 0;
     }
     mm_daemon_config_vfe_camif(cfg_obj, stream_type);
-    mm_daemon_config_vfe_demux(cfg_obj, stream_type);
+    mm_daemon_config_vfe_demux(cfg_obj);
     mm_daemon_config_vfe_out_clamp(cfg_obj);
     mm_daemon_config_vfe_chroma_subs(cfg_obj);
     mm_daemon_config_vfe_sk_enhance(cfg_obj);

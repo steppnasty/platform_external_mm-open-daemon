@@ -482,6 +482,18 @@ static struct mm_sensor_aec_config s5k4e1gx_aec_cfg = {
     .flash_threshold = 512,
 };
 
+static struct mm_sensor_awb_config s5k4e1gx_awb_prev_cfg = {
+    .dmx_wb1 = { 0x00800080, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
+    .dmx_wb2 = { 0x00800080, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
+    .wb = { 0x033E5A8D, 0, 0x0272928E, 0x033E5A8D, 0, 0x0389728D, 0, 0, 0, 0 },
+};
+
+static struct mm_sensor_awb_config s5k4e1gx_awb_snap_cfg = {
+    .dmx_wb1 = { 0x008E008E, 0, 0x008D008D, 0x008E008E, 0, 0x008D008D, 0, 0, 0, 0 },
+    .dmx_wb2 = { 0x00C90149, 0, 0x00E200B9, 0x00C90149, 0, 0x00CF012D, 0, 0, 0, 0 },
+    .wb = { 0x02010080, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
+};
+
 /* MIPI CSI Controller config */
 static struct msm_camera_csic_params s5k4e1gx_csic_params = {
     .data_format = CSIC_10BIT,
@@ -552,6 +564,11 @@ static struct mm_sensor_data s5k4e1gx_data = {
     .attr[PREVIEW] = &s5k4e1gx_attr_preview,
     .attr[SNAPSHOT] = &s5k4e1gx_attr_snapshot,
     .aec_cfg = &s5k4e1gx_aec_cfg,
+    .awb_cfg = {
+        &s5k4e1gx_awb_prev_cfg,
+        &s5k4e1gx_awb_prev_cfg,
+        &s5k4e1gx_awb_snap_cfg,
+    },
     .csi_params = (void *)&s5k4e1gx_csic_params,
     .act_params = (void *)&s5k4e1gx_act_params,
     .cap = &s5k4e1gx_capabilities,

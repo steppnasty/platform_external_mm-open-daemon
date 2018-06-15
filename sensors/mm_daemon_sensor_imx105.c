@@ -466,6 +466,18 @@ static struct mm_sensor_aec_config imx105_aec_cfg = {
     .flash_threshold = 224,
 };
 
+static struct mm_sensor_awb_config imx105_awb_prev_cfg = {
+    .dmx_wb1 = { 0x00840084, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
+    .dmx_wb2 = { 0x00800080, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
+    .wb = { 0x03EE428D, 0, 0x02EB268D, 0x031A7A8D, 0, 0x04E5968D, 0, 0, 0, 0 },
+};
+
+static struct mm_sensor_awb_config imx105_awb_snap_cfg = {
+    .dmx_wb1 = { 0x00910091, 0, 0x008D008D, 0x00910091, 0, 0x008D008D, 0, 0, 0, 0 },
+    .dmx_wb2 = { 0x01170113, 0, 0x00E200B9, 0x01170113, 0, 0x00CF012D, 0, 0, 0, 0 },
+    .wb = { 0x02010080, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
+};
+
 /* MIPI CSI Controller config */
 static struct msm_camera_csic_params imx105_csic_params = {
     .data_format = CSIC_10BIT,
@@ -543,6 +555,11 @@ static struct mm_sensor_data imx105_data = {
     .attr[PREVIEW] = &imx105_attr_preview,
     .attr[SNAPSHOT] = &imx105_attr_snapshot,
     .aec_cfg = &imx105_aec_cfg,
+    .awb_cfg = {
+        &imx105_awb_prev_cfg,
+        &imx105_awb_prev_cfg,
+        &imx105_awb_snap_cfg,
+    },
     .csi_params = (void *)&imx105_csic_params,
     .act_params = (void *)&imx105_act_params,
     .csi_dev = 0,
