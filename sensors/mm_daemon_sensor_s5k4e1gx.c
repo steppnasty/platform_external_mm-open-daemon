@@ -89,6 +89,7 @@ static struct msm_camera_i2c_reg_array s5k4e1gx_init_settings[] = {
 };
 
 static struct msm_camera_i2c_reg_array s5k4e1gx_prev_settings[] = {
+    {0x0100, 0x00, 0},/* stream stop */
     {0x034C, 0x05, 0},/* x_output size msb */
     {0x034D, 0x18, 0},/* x_output size lsb */
     {0x034E, 0x03, 0},/* y_output size msb */
@@ -110,6 +111,7 @@ static struct msm_camera_i2c_reg_array s5k4e1gx_prev_settings[] = {
     {0x3117, 0x0C, 0},/* PCLK delay */
     {0x3119, 0x0F, 0},/* V H Sync Strength */
     {0x311A, 0xFA, 0},/* Data PCLK Strength */
+    {0x0100, 0x01, 0},/* stream start */
 };
 
 static struct msm_camera_i2c_reg_array s5k4e1gx_snap_settings[] = {
@@ -135,6 +137,7 @@ static struct msm_camera_i2c_reg_array s5k4e1gx_snap_settings[] = {
     {0x3117, 0x0C, 0},
     {0x3119, 0x0F, 0},
     {0x311A, 0xFA, 0},
+    {0x0100, 0x01, 0},
 };
 
 static struct msm_camera_i2c_reg_array s5k4e1gx_stop_settings[] = {
@@ -144,18 +147,6 @@ static struct msm_camera_i2c_reg_array s5k4e1gx_stop_settings[] = {
 static struct reg_settings_t s5k4e1gx_act_init_settings[] = {
     {0x0, 0x00},
 };
-
-static int s5k4e1gx_stream_start(mm_sensor_cfg_t *cfg)
-{
-    enum msm_camera_i2c_data_type dt = MSM_CAMERA_I2C_BYTE_DATA;
-    return cfg->ops->i2c_write(cfg->mm_snsr, 0x0100, 0x01, dt);
-}
-
-static int s5k4e1gx_stream_stop(mm_sensor_cfg_t *cfg)
-{
-    enum msm_camera_i2c_data_type dt = MSM_CAMERA_I2C_BYTE_DATA;
-    return cfg->ops->i2c_write(cfg->mm_snsr, 0x0100, 0x00, dt);
-}
 
 static int s5k4e1gx_exp_gain(mm_sensor_cfg_t *cfg, uint16_t gain, uint16_t line)
 {
@@ -297,35 +288,31 @@ static int s5k4e1gx_deinit(mm_sensor_cfg_t *cfg)
 
 static int s5k4e1gx_preview(mm_sensor_cfg_t *cfg)
 {
-    int rc = -1;
     struct s5k4e1gx_pdata *pdata = (struct s5k4e1gx_pdata *)cfg->pdata;
-    enum msm_camera_i2c_data_type dt = MSM_CAMERA_I2C_BYTE_DATA;
 
     pdata->mode = PREVIEW;
 
-    s5k4e1gx_stream_stop(cfg);
-    rc = cfg->ops->i2c_write_array(cfg->mm_snsr,
-            &s5k4e1gx_prev_settings[0],
-            ARRAY_SIZE(s5k4e1gx_prev_settings), dt);
-    s5k4e1gx_stream_start(cfg);
+    return cfg->ops->i2c_write_array(cfg->mm_snsr, &s5k4e1gx_prev_settings[0],
+            ARRAY_SIZE(s5k4e1gx_prev_settings), MSM_CAMERA_I2C_BYTE_DATA);
+}
 
-    return rc;
+static int s5k4e1gx_video(mm_sensor_cfg_t *cfg)
+{
+    struct s5k4e1gx_pdata *pdata = (struct s5k4e1gx_pdata *)cfg->pdata;
+
+    pdata->mode = VIDEO;
+
+    return 0;
 }
 
 static int s5k4e1gx_snapshot(mm_sensor_cfg_t *cfg)
 {
-    int rc = -1;
     struct s5k4e1gx_pdata *pdata = (struct s5k4e1gx_pdata *)cfg->pdata;
-    enum msm_camera_i2c_data_type dt = MSM_CAMERA_I2C_BYTE_DATA;
 
     pdata->mode = SNAPSHOT;
-    s5k4e1gx_stream_stop(cfg);
-    rc = cfg->ops->i2c_write_array(cfg->mm_snsr,
-            &s5k4e1gx_snap_settings[0],
-            ARRAY_SIZE(s5k4e1gx_snap_settings), dt);
-    s5k4e1gx_stream_start(cfg);
 
-    return rc;
+    return cfg->ops->i2c_write_array(cfg->mm_snsr, &s5k4e1gx_snap_settings[0],
+            ARRAY_SIZE(s5k4e1gx_snap_settings), MSM_CAMERA_I2C_BYTE_DATA);
 }
 
 struct mm_sensor_regs s5k4e1gx_prev_regs = {
@@ -344,14 +331,6 @@ struct mm_sensor_regs s5k4e1gx_stop_regs = {
     .regs = &s5k4e1gx_stop_settings[0],
     .size = ARRAY_SIZE(s5k4e1gx_stop_settings),
     .data_type = MSM_CAMERA_I2C_BYTE_DATA,
-};
-
-struct mm_sensor_ops s5k4e1gx_ops = {
-    .init = s5k4e1gx_init,
-    .deinit = s5k4e1gx_deinit,
-    .prev = s5k4e1gx_preview,
-    .snap = s5k4e1gx_snapshot,
-    .exp_gain = s5k4e1gx_exp_gain,
 };
 
 static cam_capability_t s5k4e1gx_capabilities = {
@@ -475,7 +454,7 @@ static struct mm_sensor_aec_config s5k4e1gx_aec_cfg = {
     .line_min = 50,
     .line_max = 1960,
     .default_gain = 32,
-    .default_line = { 980, 980, 1960},
+    .default_line = { 980, 980, 1960 },
     .line_mult = 1,
     .frame_skip = 2,
     .target = 4000,
@@ -561,8 +540,11 @@ static struct mm_daemon_act_params s5k4e1gx_act_params = {
 };
 
 static struct mm_sensor_data s5k4e1gx_data = {
-    .attr[PREVIEW] = &s5k4e1gx_attr_preview,
-    .attr[SNAPSHOT] = &s5k4e1gx_attr_snapshot,
+    .attr = {
+        &s5k4e1gx_attr_preview,
+        &s5k4e1gx_attr_preview,
+        &s5k4e1gx_attr_snapshot,
+    },
     .aec_cfg = &s5k4e1gx_aec_cfg,
     .awb_cfg = {
         &s5k4e1gx_awb_prev_cfg,
@@ -580,6 +562,15 @@ static struct mm_sensor_data s5k4e1gx_data = {
     .uses_sensor_ctrls = 0,
     .csi_dev = 0,
     .act_id = 0,
+};
+
+struct mm_sensor_ops s5k4e1gx_ops = {
+    .init = s5k4e1gx_init,
+    .deinit = s5k4e1gx_deinit,
+    .prev = s5k4e1gx_preview,
+    .video = s5k4e1gx_video,
+    .snap = s5k4e1gx_snapshot,
+    .exp_gain = s5k4e1gx_exp_gain,
 };
 
 mm_sensor_cfg_t sensor_cfg_obj = {

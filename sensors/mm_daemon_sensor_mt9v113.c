@@ -1066,6 +1066,11 @@ static int mt9v113_preview(mm_sensor_cfg_t *cfg)
     return rc;
 }
 
+static int mt9v113_video(mm_sensor_cfg_t *cfg)
+{
+    return 0;
+}
+
 static int mt9v113_snapshot(mm_sensor_cfg_t *cfg)
 {
     int i;
@@ -1113,20 +1118,6 @@ struct mm_sensor_regs mt9v113_stop_regs = {
     .regs = &mt9v113_stop_settings[0],
     .size = ARRAY_SIZE(mt9v113_stop_settings),
     .data_type = MSM_CAMERA_I2C_BYTE_DATA,
-};
-
-struct mm_sensor_ops mt9v113_ops = {
-    .init = &mt9v113_init,
-    .deinit = &mt9v113_deinit,
-    .prev = &mt9v113_preview,
-    .snap = &mt9v113_snapshot,
-    .ab = &mt9v113_set_antibanding,
-    .wb = &mt9v113_set_wb,
-    .brightness = &mt9v113_set_brightness,
-    .saturation = &mt9v113_set_saturation,
-    .contrast = &mt9v113_set_contrast,
-    .effect = &mt9v113_set_effect,
-    .sharpness = &mt9v113_set_sharpness,
 };
 
 static struct mm_sensor_stream_attr mt9v113_attr = {
@@ -1247,8 +1238,11 @@ static struct msm_camera_csic_params mt9v113_csic_params = {
 };
 
 static struct mm_sensor_data mt9v113_data = {
-    .attr[PREVIEW] = &mt9v113_attr,
-    .attr[SNAPSHOT] = &mt9v113_attr,
+    .attr = {
+        &mt9v113_attr,
+        &mt9v113_attr,
+        &mt9v113_attr,
+    },
     .aec_cfg = NULL,
     .awb_cfg = { NULL, NULL, NULL },
     .csi_params = (void *)&mt9v113_csic_params,
@@ -1259,6 +1253,21 @@ static struct mm_sensor_data mt9v113_data = {
     .vfe_cfg_off = 0x0214,
     .uses_sensor_ctrls = 1,
     .stats_enable = 0,
+};
+
+struct mm_sensor_ops mt9v113_ops = {
+    .init = mt9v113_init,
+    .deinit = mt9v113_deinit,
+    .prev = mt9v113_preview,
+    .video = mt9v113_video,
+    .snap = mt9v113_snapshot,
+    .ab = mt9v113_set_antibanding,
+    .wb = mt9v113_set_wb,
+    .brightness = mt9v113_set_brightness,
+    .saturation = mt9v113_set_saturation,
+    .contrast = mt9v113_set_contrast,
+    .effect = mt9v113_set_effect,
+    .sharpness = mt9v113_set_sharpness,
 };
 
 mm_sensor_cfg_t sensor_cfg_obj = {

@@ -127,7 +127,62 @@ static struct msm_camera_i2c_reg_array imx105_prev_tbl[] = {
     {0x0100, 0x01, 0},
 };
 
+static struct msm_camera_i2c_reg_array imx105_video_tbl[] = {
+    {0x0100, 0x00, 0},
+    {0x0104, 0x01, 0},
+    {0x0340, 0x04, 0},
+    {0x0341, 0xF2, 0},
+    {0x0342, 0x0D, 0},
+    {0x0343, 0xD0, 0},
+    {0x0344, 0x00, 0},
+    {0x0345, 0x66, 0},
+    {0x0346, 0x01, 0},
+    {0x0347, 0x90, 0},
+    {0x0348, 0x0C, 0},
+    {0x0349, 0x71, 0},
+    {0x034A, 0x08, 0},
+    {0x034B, 0x57, 0},
+    {0x034C, 0x0C, 0},
+    {0x034D, 0x0C, 0},
+    {0x034E, 0x04, 0},
+    {0x034F, 0x84, 0},
+    {0x0381, 0x01, 0},
+    {0x0383, 0x01, 0},
+    {0x0385, 0x02, 0},
+    {0x0387, 0x03, 0},
+    {0x3033, 0x00, 0},
+    {0x3048, 0x00, 0},
+    {0x304C, 0x6F, 0},
+    {0x304D, 0x03, 0},
+    {0x306A, 0xF2, 0},
+    {0x309B, 0x20, 0},
+    {0x309C, 0x34, 0},
+    {0x309E, 0x00, 0},
+    {0x30AA, 0x03, 0},
+    {0x30D5, 0x00, 0},
+    {0x30D6, 0x85, 0},
+    {0x30D7, 0x2A, 0},
+    {0x30DE, 0x00, 0},
+    {0x3102, 0x08, 0},
+    {0x3103, 0x22, 0},
+    {0x3104, 0x20, 0},
+    {0x3105, 0x00, 0},
+    {0x3106, 0x87, 0},
+    {0x3107, 0x00, 0},
+    {0x315C, 0xA5, 0},
+    {0x315D, 0xA4, 0},
+    {0x316E, 0xA6, 0},
+    {0x316F, 0xA5, 0},
+    {0x3318, 0x62, 0},
+    {0x0202, 0x04, 0},
+    {0x0203, 0xED, 0},
+    {0x0104, 0x00, 0},
+    {0x0100, 0x01, 0},
+};
+
 static struct msm_camera_i2c_reg_array imx105_snap_tbl[] = {
+    {0x0100, 0x00, 0},
+    {0x0104, 0x01, 0},
     {0x0340, 0x09, 0},
     {0x0341, 0xE6, 0},
     {0x0342, 0x0D, 0},
@@ -174,6 +229,8 @@ static struct msm_camera_i2c_reg_array imx105_snap_tbl[] = {
     {0x3318, 0x62, 0},
     {0x0202, 0x09, 0},
     {0x0203, 0xE1, 0},
+    {0x0104, 0x00, 0},
+    {0x0100, 0x01, 0},
 };
 
 static struct msm_camera_i2c_reg_array imx105_stop_settings[] = {
@@ -192,18 +249,6 @@ static struct msm_camera_i2c_reg_array imx105_act_init_settings[] = {
     {0x3405, 0x00, 0},
     {0x0104, 0x00, 0},
 };
-
-static int imx105_stream_start(mm_sensor_cfg_t *cfg)
-{
-    enum msm_camera_i2c_data_type dt = MSM_CAMERA_I2C_BYTE_DATA;
-    return cfg->ops->i2c_write(cfg->mm_snsr, 0x0100, 0x01, dt);
-}
-
-static int imx105_stream_stop(mm_sensor_cfg_t *cfg)
-{
-    enum msm_camera_i2c_data_type dt = MSM_CAMERA_I2C_BYTE_DATA;
-    return cfg->ops->i2c_write(cfg->mm_snsr, 0x0100, 0x00, dt);
-}
 
 static int imx105_exp_gain(mm_sensor_cfg_t *cfg, uint16_t gain, uint16_t line)
 {
@@ -316,24 +361,31 @@ static int imx105_deinit(mm_sensor_cfg_t *cfg)
 static int imx105_preview(mm_sensor_cfg_t *cfg)
 {
     struct imx105_pdata *pdata = (struct imx105_pdata *)cfg->pdata;
-    enum msm_camera_i2c_data_type dt = MSM_CAMERA_I2C_BYTE_DATA;
-    int rc = -1;
 
     pdata->mode = PREVIEW;
 
-    return cfg->ops->i2c_write_array(cfg->mm_snsr,
-            &imx105_prev_tbl[0],
-            ARRAY_SIZE(imx105_prev_tbl), dt);
+    return cfg->ops->i2c_write_array(cfg->mm_snsr, &imx105_prev_tbl[0],
+            ARRAY_SIZE(imx105_prev_tbl), MSM_CAMERA_I2C_BYTE_DATA);
+}
+
+static int imx105_video(mm_sensor_cfg_t *cfg)
+{
+    struct imx105_pdata *pdata = (struct imx105_pdata *)cfg->pdata;
+
+    pdata->mode = VIDEO;
+
+    return cfg->ops->i2c_write_array(cfg->mm_snsr, &imx105_video_tbl[0],
+            ARRAY_SIZE(imx105_video_tbl), MSM_CAMERA_I2C_BYTE_DATA);
 }
 
 static int imx105_snapshot(mm_sensor_cfg_t *cfg)
 {
-    enum msm_camera_i2c_data_type dt = MSM_CAMERA_I2C_BYTE_DATA;
-    int rc = -1;
+    struct imx105_pdata *pdata = (struct imx105_pdata *)cfg->pdata;
 
-    rc = cfg->ops->i2c_write_array(cfg->mm_snsr, &imx105_snap_tbl[0],
-            ARRAY_SIZE(imx105_snap_tbl), dt);
-    return rc;
+    pdata->mode = SNAPSHOT;
+
+    return cfg->ops->i2c_write_array(cfg->mm_snsr, &imx105_snap_tbl[0],
+            ARRAY_SIZE(imx105_snap_tbl), MSM_CAMERA_I2C_BYTE_DATA);
 }
 
 static cam_capability_t imx105_capabilities = {
@@ -445,6 +497,14 @@ static struct mm_sensor_stream_attr imx105_attr_preview = {
     .blk_p = 1896,
 };
 
+static struct mm_sensor_stream_attr imx105_attr_video = {
+    .ro_cfg = 0x14C6060,
+    .h = 1156,
+    .w = 3084,
+    .blk_l = 110,
+    .blk_p = 452,
+};
+
 static struct mm_sensor_stream_attr imx105_attr_snapshot = {
     .ro_cfg = 0x9CCC66,
     .h = 2464,
@@ -552,8 +612,11 @@ static struct mm_daemon_act_params imx105_act_params = {
 };
 
 static struct mm_sensor_data imx105_data = {
-    .attr[PREVIEW] = &imx105_attr_preview,
-    .attr[SNAPSHOT] = &imx105_attr_snapshot,
+    .attr = { 
+        &imx105_attr_preview,
+        &imx105_attr_video,
+        &imx105_attr_snapshot,
+    },
     .aec_cfg = &imx105_aec_cfg,
     .awb_cfg = {
         &imx105_awb_prev_cfg,
@@ -583,6 +646,7 @@ static struct mm_sensor_ops imx105_ops = {
     .init = imx105_init,
     .deinit = imx105_deinit,
     .prev = imx105_preview,
+    .video = imx105_video,
     .snap = imx105_snapshot,
     .exp_gain = imx105_exp_gain,
 };

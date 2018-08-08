@@ -184,6 +184,12 @@ static int mm_daemon_sensor_execute_cmd(mm_daemon_thread_info *info,
         if ((rc = mm_snsr->cfg->ops->prev(mm_snsr->cfg)) < 0)
             ALOGE("%s: Error while setting preview mode", __FUNCTION__);
         break;
+    case SENSOR_CMD_VIDEO:
+        if (mm_snsr->cfg->ops->video) {
+            if ((rc = mm_snsr->cfg->ops->video(mm_snsr->cfg)) < 0)
+                ALOGE("%s: Error while setting video mode", __FUNCTION__);
+        }
+        break;
     case SENSOR_CMD_SNAPSHOT:
         if ((rc = mm_snsr->cfg->ops->snap(mm_snsr->cfg)) < 0)
             ALOGE("%s: Error while setting snapshot mode", __FUNCTION__);

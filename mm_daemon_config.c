@@ -433,13 +433,25 @@ static void mm_daemon_config_stream_set(mm_daemon_cfg_t *cfg_obj,
         cfg_obj->current_streams &= ~BIT(stream_type);
 }
 
-static uint8_t mm_daemon_config_streaming(mm_daemon_cfg_t *cfg_obj,
-        uint32_t stream_type)
+/*==========================================================================
+ * FUNCTION   : mm_daemon_get_sensor_mode
+ *
+ * DESCRIPTION: Determine what sensor mode to be in based on active streams
+ *
+ * PARAMETERS :
+ *   @cfg_obj: pointer to config object
+ *
+ * RETURN     : sensor stream mode
+ *==========================================================================*/
+static uint8_t mm_daemon_get_sensor_mode(mm_daemon_cfg_t *cfg_obj)
 {
-    if ((cfg_obj->current_streams & stream_type) == stream_type)
-        return TRUE;
-
-    return FALSE;
+    if ((cfg_obj->current_streams & (SB(SNAPSHOT)|SB(POSTVIEW))) ==
+            (SB(SNAPSHOT)|SB(POSTVIEW)))
+        return SNAPSHOT;
+    else if (cfg_obj->current_streams & SB(VIDEO))
+        return VIDEO;
+    else
+        return PREVIEW;
 }
 
 static mm_daemon_buf_info *mm_daemon_get_stream_buf(mm_daemon_cfg_t *cfg_obj,
@@ -543,7 +555,7 @@ static void mm_daemon_config_isp_set_metadata(mm_daemon_cfg_t *cfg_obj,
         return;
     memset(meta, 0, sizeof(cam_metadata_info_t));
 
-    if (mm_daemon_config_streaming(cfg_obj, SB(SNAPSHOT)|SB(POSTVIEW))) {
+    if (mm_daemon_get_sensor_mode(cfg_obj) == SNAPSHOT) {
         meta->is_prep_snapshot_done_valid = 1;
         meta->is_good_frame_idx_range_valid = 0;
     } else {
@@ -654,7 +666,7 @@ static int mm_daemon_config_isp_stream_request(mm_daemon_cfg_t *cfg_obj,
             stream_cfg_cmd.stream_src = PIX_ENCODER;
             break;
         case CAM_STREAM_TYPE_PREVIEW:
-            if (mm_daemon_config_streaming(cfg_obj, SB(VIDEO)))
+            if (mm_daemon_get_sensor_mode(cfg_obj) == VIDEO)
                 stream_cfg_cmd.stream_src = PIX_VIEWFINDER;
             else
                 stream_cfg_cmd.stream_src = CAMIF_RAW;
@@ -894,11 +906,11 @@ static int mm_daemon_config_vfe_reset(mm_daemon_cfg_t *cfg_obj)
     return rc;
 }
 
-static int mm_daemon_config_vfe_roll_off(mm_daemon_cfg_t *cfg_obj,
-        cam_stream_type_t stream_type)
+static int mm_daemon_config_vfe_roll_off(mm_daemon_cfg_t *cfg_obj)
 {
     int rc = 0;
     struct mm_sensor_stream_attr *sattr;
+    enum mm_sensor_stream_type mode = mm_daemon_get_sensor_mode(cfg_obj);
     uint32_t *rocfg, *p;
     struct msm_vfe_reg_cfg_cmd reg_cfg_cmd[] = {
         {
@@ -933,10 +945,7 @@ static int mm_daemon_config_vfe_roll_off(mm_daemon_cfg_t *cfg_obj,
         },
     };
 
-    if (stream_type == CAM_STREAM_TYPE_SNAPSHOT)
-        sattr = cfg_obj->sdata->attr[SNAPSHOT];
-    else
-        sattr = cfg_obj->sdata->attr[PREVIEW];
+    sattr = cfg_obj->sdata->attr[mode];
 
     if (!sattr || !sattr->ro_cfg)
         return 0;
@@ -1404,11 +1413,11 @@ static int mm_daemon_config_vfe_roll_off(mm_daemon_cfg_t *cfg_obj,
     return rc;
 }
 
-static int mm_daemon_config_vfe_fov(mm_daemon_cfg_t *cfg_obj,
-        cam_stream_type_t stream_type)
+static int mm_daemon_config_vfe_fov(mm_daemon_cfg_t *cfg_obj)
 {
     int rc = 0;
     struct mm_sensor_stream_attr *sattr;
+    enum mm_sensor_stream_type mode = mm_daemon_get_sensor_mode(cfg_obj);
     uint32_t pix_offset;
     uint32_t fov_w, fov_h;
     uint32_t reg_w, reg_h;
@@ -1425,17 +1434,26 @@ static int mm_daemon_config_vfe_fov(mm_daemon_cfg_t *cfg_obj,
         },
     };
 
-    buf = mm_daemon_get_stream_buf(cfg_obj, stream_type);
-    if (!buf)
-        return -ENOMEM;
-    dim = buf->stream_info->dim;
+    sattr = cfg_obj->sdata->attr[mode];
 
-    if (stream_type == CAM_STREAM_TYPE_SNAPSHOT)
-        sattr = cfg_obj->sdata->attr[SNAPSHOT];
-    else
-        sattr = cfg_obj->sdata->attr[PREVIEW];
-    if (!sattr)
+    switch (mode) {
+    case SNAPSHOT:
+        buf = mm_daemon_get_stream_buf(cfg_obj, CAM_STREAM_TYPE_SNAPSHOT);
+        break;
+    case VIDEO:
+        buf = mm_daemon_get_stream_buf(cfg_obj, CAM_STREAM_TYPE_VIDEO);
+        break;
+    case PREVIEW:
+        buf = mm_daemon_get_stream_buf(cfg_obj, CAM_STREAM_TYPE_PREVIEW);
+        break;
+    default:
         return -EINVAL;
+    }
+
+    if (!buf || !sattr)
+        return -ENOMEM;
+
+    dim = buf->stream_info->dim;
 
     reg_h = sattr->h;
     reg_w = sattr->w;
@@ -1462,11 +1480,11 @@ static int mm_daemon_config_vfe_fov(mm_daemon_cfg_t *cfg_obj,
     return rc;
 }
 
-static int mm_daemon_config_vfe_main_scaler(mm_daemon_cfg_t *cfg_obj,
-        cam_stream_type_t stream_type)
+static int mm_daemon_config_vfe_main_scaler(mm_daemon_cfg_t *cfg_obj)
 {
     int rc = 0;
     struct mm_sensor_stream_attr *sattr;
+    enum mm_sensor_stream_type mode = mm_daemon_get_sensor_mode(cfg_obj);
     cam_dimension_t dim;
     mm_daemon_buf_info *buf;
     uint32_t reg_w, reg_h;
@@ -1481,14 +1499,25 @@ static int mm_daemon_config_vfe_main_scaler(mm_daemon_cfg_t *cfg_obj,
         },
     };
 
-    buf = mm_daemon_get_stream_buf(cfg_obj, stream_type);
-    if (!buf)
+    sattr = cfg_obj->sdata->attr[mode];
+
+    switch (mode) {
+    case SNAPSHOT:
+        buf = mm_daemon_get_stream_buf(cfg_obj, CAM_STREAM_TYPE_SNAPSHOT);
+        break;
+    case VIDEO:
+	buf = mm_daemon_get_stream_buf(cfg_obj, CAM_STREAM_TYPE_VIDEO);
+        break;
+    case PREVIEW:
+        buf = mm_daemon_get_stream_buf(cfg_obj, CAM_STREAM_TYPE_PREVIEW);
+        break;
+    default:
+        return -EINVAL;
+    }
+
+    if (!buf || !sattr)
         return -ENOMEM;
     dim = buf->stream_info->dim;
-    if (stream_type == CAM_STREAM_TYPE_SNAPSHOT)
-        sattr = cfg_obj->sdata->attr[SNAPSHOT];
-    else
-        sattr = cfg_obj->sdata->attr[PREVIEW];
 
     reg_h = sattr->h;
     reg_w = sattr->w;
@@ -1516,14 +1545,12 @@ static int mm_daemon_config_vfe_main_scaler(mm_daemon_cfg_t *cfg_obj,
     return rc;
 }
 
-static int mm_daemon_config_vfe_s2y(mm_daemon_cfg_t *cfg_obj,
-        cam_stream_type_t stream_type)
+static int mm_daemon_config_vfe_s2y(mm_daemon_cfg_t *cfg_obj)
 {
     int rc = 0;
     uint32_t *s2y_cfg, *p;
-    uint32_t s2y_width, s2y_height;
-    cam_dimension_t dim;
-    mm_daemon_buf_info *buf;
+    mm_daemon_buf_info *vb, *rb;
+    enum mm_sensor_stream_type mode = mm_daemon_get_sensor_mode(cfg_obj);
     struct msm_vfe_reg_cfg_cmd reg_cfg_cmd[] = {
         {
             .u.rw_info = {
@@ -1534,30 +1561,32 @@ static int mm_daemon_config_vfe_s2y(mm_daemon_cfg_t *cfg_obj,
         },
     };
 
-    if (mm_daemon_config_streaming(cfg_obj, SB(POSTVIEW)))
-        buf = mm_daemon_get_stream_buf(cfg_obj, CAM_STREAM_TYPE_POSTVIEW);
-    else
-        buf = mm_daemon_get_stream_buf(cfg_obj, stream_type);
-    if (!buf)
-        return -ENOMEM;
-    dim = buf->stream_info->dim;
-    s2y_width = dim.width << 16;
-    s2y_height = dim.height << 16;
-    if (mm_daemon_config_streaming(cfg_obj, SB(POSTVIEW))) {
-        buf = mm_daemon_get_stream_buf(cfg_obj, stream_type);
-        if (!buf)
-            return -ENOMEM;
-        dim = buf->stream_info->dim;
+    switch (mode) {
+    case SNAPSHOT:
+        vb = mm_daemon_get_stream_buf(cfg_obj, CAM_STREAM_TYPE_POSTVIEW);
+        rb = mm_daemon_get_stream_buf(cfg_obj, CAM_STREAM_TYPE_SNAPSHOT);
+        break;
+    case VIDEO:
+        vb = mm_daemon_get_stream_buf(cfg_obj, CAM_STREAM_TYPE_PREVIEW);
+	rb = mm_daemon_get_stream_buf(cfg_obj, CAM_STREAM_TYPE_VIDEO);
+        break;
+    case PREVIEW:
+        vb = mm_daemon_get_stream_buf(cfg_obj, CAM_STREAM_TYPE_PREVIEW);
+        rb = vb;
+        break;
+    default:
+        return -EINVAL;
     }
-    s2y_width |= dim.width;
-    s2y_height |= dim.height;
+
+    if (!vb || !rb)
+        return -ENOMEM;
 
     s2y_cfg = (uint32_t *)malloc(20);
     p = s2y_cfg;
     *p++ = 0x3;
-    *p++ = s2y_width;
+    *p++ = vb->stream_info->dim.width << 16 | rb->stream_info->dim.width;
     *p++ = 0x00310000;
-    *p++ = s2y_height;
+    *p++ = vb->stream_info->dim.height << 16 | rb->stream_info->dim.height;
     *p = 0x00310000;
 
     rc = mm_daemon_config_vfe_reg_cmd(cfg_obj, 20, (void *)s2y_cfg,
@@ -1566,15 +1595,12 @@ static int mm_daemon_config_vfe_s2y(mm_daemon_cfg_t *cfg_obj,
     return rc;
 }
 
-static int mm_daemon_config_vfe_s2cbcr(mm_daemon_cfg_t *cfg_obj,
-        cam_stream_type_t stream_type)
+static int mm_daemon_config_vfe_s2cbcr(mm_daemon_cfg_t *cfg_obj)
 {
     int rc = 0;
     uint32_t *s2cbcr_cfg, *p;
-    uint32_t s2cbcr_width;
-    uint32_t s2cbcr_height;
-    cam_dimension_t dim;
-    mm_daemon_buf_info *buf;
+    mm_daemon_buf_info *vb, *rb;
+    enum mm_sensor_stream_type mode = mm_daemon_get_sensor_mode(cfg_obj);
     struct msm_vfe_reg_cfg_cmd reg_cfg_cmd[] = {
         {
             .u.rw_info = {
@@ -1585,31 +1611,32 @@ static int mm_daemon_config_vfe_s2cbcr(mm_daemon_cfg_t *cfg_obj,
         },
     };
 
-    if (mm_daemon_config_streaming(cfg_obj, SB(POSTVIEW)))
-        buf = mm_daemon_get_stream_buf(cfg_obj, CAM_STREAM_TYPE_POSTVIEW);
-    else
-        buf = mm_daemon_get_stream_buf(cfg_obj, stream_type);
-    if (!buf)
-        return -ENOMEM;
-    dim = buf->stream_info->dim;
-    s2cbcr_width = (dim.width/2) << 16;
-    s2cbcr_height = (dim.height/2) << 16;
-
-    if (mm_daemon_config_streaming(cfg_obj, SB(POSTVIEW))) {
-        buf = mm_daemon_get_stream_buf(cfg_obj, stream_type);
-        if (!buf)
-            return -ENOMEM;
-        dim = buf->stream_info->dim;
+    switch (mode) {
+    case SNAPSHOT:
+        vb = mm_daemon_get_stream_buf(cfg_obj, CAM_STREAM_TYPE_POSTVIEW);
+        rb = mm_daemon_get_stream_buf(cfg_obj, CAM_STREAM_TYPE_SNAPSHOT);
+        break;
+    case VIDEO:
+        vb = mm_daemon_get_stream_buf(cfg_obj, CAM_STREAM_TYPE_PREVIEW);
+	rb = mm_daemon_get_stream_buf(cfg_obj, CAM_STREAM_TYPE_VIDEO);
+        break;
+    case PREVIEW:
+        vb = mm_daemon_get_stream_buf(cfg_obj, CAM_STREAM_TYPE_PREVIEW);
+        rb = vb;
+        break;
+    default:
+        return -EINVAL;
     }
-    s2cbcr_width |= dim.width;
-    s2cbcr_height |= dim.height;
+
+    if (!vb || !rb)
+        return -ENOMEM;
 
     s2cbcr_cfg = (uint32_t *)malloc(20);
     p = s2cbcr_cfg;
     *p++ = 0x00000003;
-    *p++ = s2cbcr_width;
+    *p++ = (vb->stream_info->dim.width/2) << 16 | rb->stream_info->dim.width;
     *p++ = 0x0;
-    *p++ = s2cbcr_height;
+    *p++ = (vb->stream_info->dim.height/2) << 16 | rb->stream_info->dim.height;
     *p = 0x0;
 
     rc = mm_daemon_config_vfe_reg_cmd(cfg_obj, 20, (void *)s2cbcr_cfg,
@@ -1618,8 +1645,7 @@ static int mm_daemon_config_vfe_s2cbcr(mm_daemon_cfg_t *cfg_obj,
     return rc;
 }
 
-static int mm_daemon_config_vfe_axi(mm_daemon_cfg_t *cfg_obj,
-        cam_stream_type_t stream_type)
+static int mm_daemon_config_vfe_axi(mm_daemon_cfg_t *cfg_obj)
 {
     int rc = 0;
     uint32_t *axiout, *p;
@@ -1671,7 +1697,7 @@ static int mm_daemon_config_vfe_axi(mm_daemon_cfg_t *cfg_obj,
     *p++ = 0x2AAA771;
     *p++ = 0x1;
 
-    if (stream_type == CAM_STREAM_TYPE_SNAPSHOT) {
+    if (mm_daemon_get_sensor_mode(cfg_obj) == SNAPSHOT) {
         *p++ = 0x203;
         *p++ = 0x22;
         *p++ = 0x340022;
@@ -1769,8 +1795,7 @@ static int mm_daemon_config_vfe_color_cor(mm_daemon_cfg_t *cfg_obj)
     return rc;
 }
 
-static int mm_daemon_config_vfe_asf(mm_daemon_cfg_t *cfg_obj,
-        cam_stream_type_t stream_type)
+static int mm_daemon_config_vfe_asf(mm_daemon_cfg_t *cfg_obj)
 {
     int rc = 0;
     uint32_t *asf_cfg, *p;
@@ -1789,7 +1814,7 @@ static int mm_daemon_config_vfe_asf(mm_daemon_cfg_t *cfg_obj,
 
     asf_cfg = (uint32_t *)malloc(48);
     p = asf_cfg;
-    if (stream_type == CAM_STREAM_TYPE_SNAPSHOT) {
+    if (mm_daemon_get_sensor_mode(cfg_obj) == SNAPSHOT) {
         *p++ = 0x000028bd;
         *p++ = 0x000c0c12;
         *p++ = 0xd828d828;
@@ -1825,6 +1850,7 @@ static int mm_daemon_config_vfe_white_balance(mm_daemon_cfg_t *cfg_obj)
     int rc = 0;
     int32_t wb_mode;
     uint32_t wb_reg;
+    enum mm_sensor_stream_type mode = mm_daemon_get_sensor_mode(cfg_obj);
     struct mm_sensor_awb_config *awb_cfg;
     struct msm_vfe_reg_cfg_cmd reg_cfg_cmd[] = {
         {
@@ -1836,10 +1862,7 @@ static int mm_daemon_config_vfe_white_balance(mm_daemon_cfg_t *cfg_obj)
         },
     };
 
-    if (mm_daemon_config_streaming(cfg_obj, SB(SNAPSHOT)|SB(POSTVIEW)))
-        awb_cfg = cfg_obj->sdata->awb_cfg[SNAPSHOT];
-    else
-        awb_cfg = cfg_obj->sdata->awb_cfg[PREVIEW];
+    awb_cfg = cfg_obj->sdata->awb_cfg[mode];
 
     if (!awb_cfg)
         return 0;
@@ -1985,14 +2008,12 @@ static int mm_daemon_config_vfe_rgb_gamma_chbank(mm_daemon_cfg_t *cfg_obj, int b
     return rc;
 }
 
-static int mm_daemon_config_vfe_camif(mm_daemon_cfg_t *cfg_obj,
-        cam_stream_type_t stream_type)
+static int mm_daemon_config_vfe_camif(mm_daemon_cfg_t *cfg_obj)
 {
     int rc = 0;
     struct mm_sensor_stream_attr *sattr;
+    enum mm_sensor_stream_type mode = mm_daemon_get_sensor_mode(cfg_obj);
     uint32_t camif_width, camif_type;
-    cam_dimension_t dim;
-    mm_daemon_buf_info *buf;
     uint32_t *camif_cfg, *p;
     struct msm_vfe_reg_cfg_cmd reg_cfg_cmd[] = {
         {
@@ -2016,15 +2037,7 @@ static int mm_daemon_config_vfe_camif(mm_daemon_cfg_t *cfg_obj,
     } else
         camif_type = 0x100;
 
-    buf = mm_daemon_get_stream_buf(cfg_obj, stream_type);
-    if (!buf)
-        return -ENOMEM;
-    dim = buf->stream_info->dim;
-
-    if (stream_type == CAM_STREAM_TYPE_SNAPSHOT)
-        sattr = cfg_obj->sdata->attr[SNAPSHOT];
-    else
-        sattr = cfg_obj->sdata->attr[PREVIEW];
+    sattr = cfg_obj->sdata->attr[mode];
 
     if (cfg_obj->sdata->uses_sensor_ctrls)
         camif_width = sattr->w * 2;
@@ -2052,6 +2065,7 @@ static int mm_daemon_config_vfe_demux(mm_daemon_cfg_t *cfg_obj)
 {
     int rc = 0;
     int32_t wb_mode;
+    enum mm_sensor_stream_type mode = mm_daemon_get_sensor_mode(cfg_obj);
     uint32_t *demux_cfg, *p;
     struct mm_sensor_awb_config *awb_cfg;
     struct msm_vfe_reg_cfg_cmd reg_cfg_cmd[] = {
@@ -2065,11 +2079,7 @@ static int mm_daemon_config_vfe_demux(mm_daemon_cfg_t *cfg_obj)
     };
 
     wb_mode = mm_daemon_config_get_parm(cfg_obj, CAM_INTF_PARM_WHITE_BALANCE);
-    if (mm_daemon_config_streaming(cfg_obj, SB(SNAPSHOT)|SB(POSTVIEW)))
-        awb_cfg = cfg_obj->sdata->awb_cfg[SNAPSHOT];
-    else
-        awb_cfg = cfg_obj->sdata->awb_cfg[PREVIEW];
-
+    awb_cfg = cfg_obj->sdata->awb_cfg[mode];
 
     demux_cfg = (uint32_t *)malloc(20);
     p = demux_cfg;
@@ -2784,8 +2794,12 @@ static int mm_daemon_config_start_preview(mm_daemon_cfg_t *cfg_obj)
         mm_daemon_util_subdev_cmd(cfg_obj->info[CSI_DEV],
                 CSI_CMD_CFG, 0, FALSE);
 
-    mm_daemon_util_subdev_cmd(cfg_obj->info[SNSR_DEV],
-            SENSOR_CMD_PREVIEW, 0, TRUE);
+    if (mm_daemon_get_sensor_mode(cfg_obj) == VIDEO)
+        mm_daemon_util_subdev_cmd(cfg_obj->info[SNSR_DEV],
+                SENSOR_CMD_VIDEO, 0, TRUE);
+    else
+        mm_daemon_util_subdev_cmd(cfg_obj->info[SNSR_DEV],
+                SENSOR_CMD_PREVIEW, 0, TRUE);
 
     if (aec_cfg)
         mm_daemon_config_exp_gain(cfg_obj, aec_cfg->default_gain,
@@ -2796,15 +2810,15 @@ static int mm_daemon_config_start_preview(mm_daemon_cfg_t *cfg_obj)
 
     if (buf->stream_info->num_bufs)
         mm_daemon_config_isp_buf_enqueue(cfg_obj, stream_type);
-    mm_daemon_config_vfe_roll_off(cfg_obj, stream_type);
-    mm_daemon_config_vfe_fov(cfg_obj, stream_type);
-    mm_daemon_config_vfe_main_scaler(cfg_obj, stream_type);
-    mm_daemon_config_vfe_s2y(cfg_obj, stream_type);
-    mm_daemon_config_vfe_s2cbcr(cfg_obj, stream_type);
-    mm_daemon_config_vfe_axi(cfg_obj, stream_type);
+    mm_daemon_config_vfe_roll_off(cfg_obj);
+    mm_daemon_config_vfe_fov(cfg_obj);
+    mm_daemon_config_vfe_main_scaler(cfg_obj);
+    mm_daemon_config_vfe_s2y(cfg_obj);
+    mm_daemon_config_vfe_s2cbcr(cfg_obj);
+    mm_daemon_config_vfe_axi(cfg_obj);
     mm_daemon_config_vfe_chroma_en(cfg_obj);
     mm_daemon_config_vfe_color_cor(cfg_obj);
-    mm_daemon_config_vfe_asf(cfg_obj, stream_type);
+    mm_daemon_config_vfe_asf(cfg_obj);
     mm_daemon_config_vfe_white_balance(cfg_obj);
     mm_daemon_config_vfe_black_level(cfg_obj);
     mm_daemon_config_vfe_mce(cfg_obj);
@@ -2813,7 +2827,7 @@ static int mm_daemon_config_start_preview(mm_daemon_cfg_t *cfg_obj)
     mm_daemon_config_vfe_rgb_gamma_chbank(cfg_obj, 4);
     mm_daemon_config_vfe_rgb_gamma_chbank(cfg_obj, 6);
     mm_daemon_config_vfe_rgb_gamma_chbank(cfg_obj, 12);
-    mm_daemon_config_vfe_camif(cfg_obj, stream_type);
+    mm_daemon_config_vfe_camif(cfg_obj);
     mm_daemon_config_vfe_demux(cfg_obj);
     mm_daemon_config_vfe_out_clamp(cfg_obj);
     mm_daemon_config_vfe_frame_skip(cfg_obj);
@@ -2822,7 +2836,8 @@ static int mm_daemon_config_start_preview(mm_daemon_cfg_t *cfg_obj)
     mm_daemon_config_vfe_op_mode(cfg_obj);
     mm_daemon_config_isp_input_cfg(cfg_obj);
     mm_daemon_config_isp_stream_request(cfg_obj, stream_type);
-    return mm_daemon_config_isp_stream_cfg(cfg_obj, stream_type, START_STREAM);
+    mm_daemon_config_isp_stream_cfg(cfg_obj, stream_type, START_STREAM);
+    return 0;
 }
 
 static void mm_daemon_config_stop_preview(mm_daemon_cfg_t *cfg_obj)
@@ -2849,15 +2864,15 @@ static int mm_daemon_config_start_snapshot(mm_daemon_cfg_t *cfg_obj)
         mm_daemon_config_exp_gain(cfg_obj, aec_cfg->gain_min,
                 aec_cfg->default_line[SNAPSHOT], TRUE);
 
-    mm_daemon_config_vfe_roll_off(cfg_obj, stream_type);
-    mm_daemon_config_vfe_fov(cfg_obj, stream_type);
-    mm_daemon_config_vfe_main_scaler(cfg_obj, stream_type);
-    mm_daemon_config_vfe_s2y(cfg_obj, stream_type);
-    mm_daemon_config_vfe_s2cbcr(cfg_obj, stream_type);
-    mm_daemon_config_vfe_axi(cfg_obj, stream_type);
+    mm_daemon_config_vfe_roll_off(cfg_obj);
+    mm_daemon_config_vfe_fov(cfg_obj);
+    mm_daemon_config_vfe_main_scaler(cfg_obj);
+    mm_daemon_config_vfe_s2y(cfg_obj);
+    mm_daemon_config_vfe_s2cbcr(cfg_obj);
+    mm_daemon_config_vfe_axi(cfg_obj);
     mm_daemon_config_vfe_chroma_en(cfg_obj);
     mm_daemon_config_vfe_color_cor(cfg_obj);
-    mm_daemon_config_vfe_asf(cfg_obj, stream_type);
+    mm_daemon_config_vfe_asf(cfg_obj);
     mm_daemon_config_vfe_white_balance(cfg_obj);
     mm_daemon_config_vfe_black_level(cfg_obj);
     mm_daemon_config_vfe_rgb_gamma(cfg_obj);
@@ -2870,7 +2885,7 @@ static int mm_daemon_config_start_snapshot(mm_daemon_cfg_t *cfg_obj)
                 LED_CMD_CONTROL, MSM_CAMERA_LED_HIGH, FALSE);
         cfg_obj->prep_snapshot = 0;
     }
-    mm_daemon_config_vfe_camif(cfg_obj, stream_type);
+    mm_daemon_config_vfe_camif(cfg_obj);
     mm_daemon_config_vfe_demux(cfg_obj);
     mm_daemon_config_vfe_out_clamp(cfg_obj);
     mm_daemon_config_vfe_chroma_subs(cfg_obj);
@@ -3116,7 +3131,6 @@ static void mm_daemon_config_auto_exposure(mm_daemon_cfg_t *cfg_obj,
         uint32_t buf_idx)
 {
     int i;
-    int mode;
     int32_t led_mode;
     int32_t stat_val = 0;
     int16_t gain_adj = 0;
@@ -3126,6 +3140,7 @@ static void mm_daemon_config_auto_exposure(mm_daemon_cfg_t *cfg_obj,
     uint16_t max_line_adj = 100;
     uint8_t flash_needed = FALSE;
     uint16_t work_buf[256];
+    enum mm_sensor_stream_type mode = mm_daemon_get_sensor_mode(cfg_obj);
     struct mm_sensor_aec_config *aec_cfg = cfg_obj->sdata->aec_cfg;
     mm_daemon_stats_buf_info *stat = cfg_obj->stats_buf[MSM_ISP_STATS_AEC];
 
@@ -3133,11 +3148,6 @@ static void mm_daemon_config_auto_exposure(mm_daemon_cfg_t *cfg_obj,
             mm_daemon_config_get_parm(cfg_obj, CAM_INTF_PARM_AEC_LOCK) ||
             !aec_cfg)
         return;
-
-    if (mm_daemon_config_streaming(cfg_obj, SB(SNAPSHOT)|SB(POSTVIEW)))
-        mode = SNAPSHOT;
-    else
-        mode = PREVIEW;
 
     led_mode = mm_daemon_config_get_parm(cfg_obj,
             CAM_INTF_PARM_LED_MODE);
