@@ -41,7 +41,8 @@ struct mm_sensor_ops {
     int (*i2c_write_array)(void *snsr,
             struct msm_camera_i2c_reg_array *reg_setting, uint16_t size,
             enum msm_camera_i2c_data_type data_type);
-    int (*init)(struct mm_sensor_cfg *cfg);
+    int (*init_regs)(struct mm_sensor_cfg *cfg);
+    int (*init_data)(struct mm_sensor_cfg *cfg);
     int (*deinit)(struct mm_sensor_cfg *cfg);
     int (*prev)(struct mm_sensor_cfg *cfg);
     int (*video)(struct mm_sensor_cfg *cfg);

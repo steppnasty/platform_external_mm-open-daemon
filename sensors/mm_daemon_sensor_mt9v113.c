@@ -23,11 +23,6 @@
 #include "mm_sensor.h"
 #include "../common.h"
 
-struct mt9v113_pdata {
-    uint8_t mode;
-    unsigned int pre_mirror_mode;
-};
-
 enum mt9v113_brightness_mode {
     BRIGHTNESS_N3,
     BRIGHTNESS_N2,
@@ -62,20 +57,24 @@ enum mt9v113_contrast_mode {
     CONTRAST_N2,
 };
 
-enum mt9v113_effect_mode {
-    EFFECT_OFF,
-    EFFECT_MONO,
-    EFFECT_NEGATIVE,
-    EFFECT_SEPIA,
-    EFFECT_AQUA,
-};
-
 enum mt9v113_sharpness_mode {
     SHARPNESS_X0,
     SHARPNESS_X1,
     SHARPNESS_X2,
     SHARPNESS_X3,
     SHARPNESS_X4,
+};
+
+struct mt9v113_pdata {
+    int mode;
+    int ab;
+    int wb;
+    int effect;
+    enum mt9v113_brightness_mode brightness;
+    enum mt9v113_saturation_mode saturation;
+    enum mt9v113_contrast_mode contrast;
+    enum mt9v113_sharpness_mode sharpness;
+    enum mt9v113_ffc_mode mirror;
 };
 
 static struct msm_camera_i2c_reg_array mt9v113_stop_settings[] = {
@@ -622,211 +621,160 @@ static struct msm_camera_i2c_reg_array mt9v113_snap_settings[] = {
 
 static int mt9v113_set_antibanding(mm_sensor_cfg_t *cfg, int mode)
 {
-    int rc = -1;
+    struct mt9v113_pdata *pdata = (struct mt9v113_pdata *)cfg->pdata;
     enum msm_camera_i2c_data_type dt = MSM_CAMERA_I2C_WORD_DATA;
 
+    pdata->ab = mode;
+
+    if (pdata->mode < 0)
+        return 0;
+
     switch (mode) {
-        case CAM_ANTIBANDING_MODE_50HZ:
-            rc = cfg->ops->i2c_write_array(cfg->mm_snsr,
-                    &mt9v113_antibanding_50hz[0],
-                    ARRAY_SIZE(mt9v113_antibanding_50hz), dt);
-            break;
-        case CAM_ANTIBANDING_MODE_60HZ:
-        case CAM_ANTIBANDING_MODE_AUTO:
-            rc = cfg->ops->i2c_write_array(cfg->mm_snsr,
-                    &mt9v113_antibanding_60hz[0],
-                    ARRAY_SIZE(mt9v113_antibanding_60hz), dt);
-            break;
-        default:
-            break;
+    case CAM_ANTIBANDING_MODE_50HZ:
+        return cfg->ops->i2c_write_array(cfg->mm_snsr, mt9v113_antibanding_50hz,
+                ARRAY_SIZE(mt9v113_antibanding_50hz), dt);
+    case CAM_ANTIBANDING_MODE_60HZ:
+    case CAM_ANTIBANDING_MODE_AUTO:
+        return cfg->ops->i2c_write_array(cfg->mm_snsr, mt9v113_antibanding_60hz,
+                ARRAY_SIZE(mt9v113_antibanding_60hz), dt);
+    default:
+        break;
     }
-    return rc;
+    return -1;
 }
 
 static int mt9v113_set_wb(mm_sensor_cfg_t *cfg, int wb_mode)
 {
-    int i, rc;
-    uint16_t value;
-    struct msm_camera_i2c_reg_setting setting;
-    struct msm_camera_i2c_read_config read_config;
+    int i;
+    uint16_t value, wb_size1, wb_size2;
+    struct msm_camera_i2c_reg_array *wb_setting1, *wb_setting2;
+    struct mt9v113_pdata *pdata = (struct mt9v113_pdata *)cfg->pdata;
     enum msm_camera_i2c_data_type dt = MSM_CAMERA_I2C_WORD_DATA;
 
+    pdata->wb = wb_mode;
+
+    if (pdata->mode < 0)
+        return 0;
+
     switch (wb_mode) {
-        case CAM_WB_MODE_AUTO:
-            cfg->ops->i2c_write_array(cfg->mm_snsr,
-                    &mt9v113_wb_auto_0[0], ARRAY_SIZE(mt9v113_wb_auto_0), dt);
-
-            for (i = 0; i < 100; i++) {
-                cfg->ops->i2c_write(cfg->mm_snsr, 0x098C, 0xA103, dt);
-
-                cfg->ops->i2c_read(cfg->mm_snsr, 0x0990, &value, dt);
-                if (value == 0x0)
-                    break;
-                usleep(1000);
-            }
-            if (i == 100)
-                return -1;
-
-            rc = cfg->ops->i2c_write_array(cfg->mm_snsr,
-                    &mt9v113_wb_auto_1[0],
-                    ARRAY_SIZE(mt9v113_wb_auto_1), dt);
-            break;
-        case CAM_WB_MODE_INCANDESCENT:
-            cfg->ops->i2c_write_array(cfg->mm_snsr,
-                    &mt9v113_wb_incandescent_0[0],
-                    ARRAY_SIZE(mt9v113_wb_incandescent_0), dt);
-
-            for (i = 0; i < 100; i++) {
-                cfg->ops->i2c_write(cfg->mm_snsr, 0x098C, 0xA103, dt);
-
-                cfg->ops->i2c_read(cfg->mm_snsr, 0x0990, &value, dt);
-                if (value == 0x0)
-                    break;
-                usleep(1000);
-            }
-            if (i == 100)
-                return -1;
-
-            rc = cfg->ops->i2c_write_array(cfg->mm_snsr,
-                    &mt9v113_wb_incandescent_1[0],
-                    ARRAY_SIZE(mt9v113_wb_incandescent_1), dt);
-            break;
-        case CAM_WB_MODE_FLUORESCENT:
-            cfg->ops->i2c_write_array(cfg->mm_snsr,
-                    &mt9v113_wb_fluorescent_0[0],
-                    ARRAY_SIZE(mt9v113_wb_fluorescent_0), dt);
-
-            for (i = 0; i < 100; i++) {
-                cfg->ops->i2c_write(cfg->mm_snsr, 0x098C, 0xA103, dt);
-
-                cfg->ops->i2c_read(cfg->mm_snsr, 0x0990, &value, dt);
-                if (value == 0x0)
-                    break;
-                usleep(1000);
-            }
-            if (i == 100)
-                return -1;
-
-            rc = cfg->ops->i2c_write_array(cfg->mm_snsr,
-                    &mt9v113_wb_fluorescent_1[0],
-                    ARRAY_SIZE(mt9v113_wb_fluorescent_1), dt);
-            break;
-        case CAM_WB_MODE_DAYLIGHT:
-            cfg->ops->i2c_write_array(cfg->mm_snsr,
-                    &mt9v113_wb_daylight_0[0],
-                    ARRAY_SIZE(mt9v113_wb_daylight_0), dt);
-
-            for (i = 0; i < 100; i++) {
-                cfg->ops->i2c_write(cfg->mm_snsr, 0x098C, 0xA103, dt);
-
-                cfg->ops->i2c_read(cfg->mm_snsr, 0x0990, &value, dt);
-                if (value == 0x0)
-                    break;
-                usleep(1000);
-            }
-            if (i == 100)
-                return -1;
-
-            rc = cfg->ops->i2c_write_array(cfg->mm_snsr,
-                    &mt9v113_wb_daylight_1[0],
-                    ARRAY_SIZE(mt9v113_wb_daylight_1), dt);
-            break;
-        default:
-            rc = -1;
-            break;
+    case CAM_WB_MODE_AUTO:
+        wb_setting1 = mt9v113_wb_auto_0;
+        wb_setting2 = mt9v113_wb_auto_1;
+        wb_size1 = ARRAY_SIZE(mt9v113_wb_auto_0);
+        wb_size2 = ARRAY_SIZE(mt9v113_wb_auto_1);
+        break;
+    case CAM_WB_MODE_INCANDESCENT:
+        wb_setting1 = mt9v113_wb_incandescent_0;
+        wb_setting2 = mt9v113_wb_incandescent_1;
+        wb_size1 = ARRAY_SIZE(mt9v113_wb_incandescent_0);
+        wb_size2 = ARRAY_SIZE(mt9v113_wb_incandescent_1);
+        break;
+    case CAM_WB_MODE_FLUORESCENT:
+        wb_setting1 = mt9v113_wb_fluorescent_0;
+        wb_setting2 = mt9v113_wb_fluorescent_1;
+        wb_size1 = ARRAY_SIZE(mt9v113_wb_fluorescent_0);
+        wb_size2 = ARRAY_SIZE(mt9v113_wb_fluorescent_1);
+        break;
+    case CAM_WB_MODE_DAYLIGHT:
+        wb_setting1 = mt9v113_wb_daylight_0;
+        wb_setting2 = mt9v113_wb_daylight_1;
+        wb_size1 = ARRAY_SIZE(mt9v113_wb_daylight_0);
+        wb_size2 = ARRAY_SIZE(mt9v113_wb_daylight_1);
+        break;
+    default:
+        return -1;
     }
-    return rc;
+
+    if (cfg->ops->i2c_write_array(cfg->mm_snsr, wb_setting1, wb_size1, dt) < 0)
+        return -1;
+
+    for (i = 0; i < 100; i++) {
+        cfg->ops->i2c_write(cfg->mm_snsr, 0x098C, 0xA103, dt);
+        cfg->ops->i2c_read(cfg->mm_snsr, 0x0990, &value, dt);
+        if (value == 0x0)
+            break;
+        usleep(1000);
+    }
+    if (i == 100)
+        return -1;
+
+    return cfg->ops->i2c_write_array(cfg->mm_snsr, wb_setting2, wb_size2, dt);
 }
 
 static int mt9v113_set_brightness(mm_sensor_cfg_t *cfg, int mode)
 {
-    int rc = -1;
+    struct mt9v113_pdata *pdata = (struct mt9v113_pdata *)cfg->pdata;
     enum msm_camera_i2c_data_type dt = MSM_CAMERA_I2C_WORD_DATA;
 
+    pdata->brightness = mode;
+
+    if (pdata->mode < 0)
+        return 0;
+
     switch (mode) {
-        case BRIGHTNESS_N4:
-            rc = cfg->ops->i2c_write_array(cfg->mm_snsr,
-                    &mt9v113_brightness_n4[0],
-                    ARRAY_SIZE(mt9v113_brightness_n4), dt);
-            break;
-        case BRIGHTNESS_N3:
-            rc = cfg->ops->i2c_write_array(cfg->mm_snsr,
-                    &mt9v113_brightness_n3[0],
-                    ARRAY_SIZE(mt9v113_brightness_n3), dt);
-            break;
-        case BRIGHTNESS_N2:
-            rc = cfg->ops->i2c_write_array(cfg->mm_snsr,
-                    &mt9v113_brightness_n2[0],
-                    ARRAY_SIZE(mt9v113_brightness_n2), dt);
-            break;
-        case BRIGHTNESS_N1:
-            rc = cfg->ops->i2c_write_array(cfg->mm_snsr,
-                    &mt9v113_brightness_n1[0],
-                    ARRAY_SIZE(mt9v113_brightness_n1), dt);
-            break;
-        case BRIGHTNESS_DEFAULT:
-            rc = cfg->ops->i2c_write_array(cfg->mm_snsr,
-                    &mt9v113_brightness_d[0],
-                    ARRAY_SIZE(mt9v113_brightness_d), dt);
-            break;
-        case BRIGHTNESS_P1:
-            rc = cfg->ops->i2c_write_array(cfg->mm_snsr,
-                    &mt9v113_brightness_p1[0],
-                    ARRAY_SIZE(mt9v113_brightness_p1), dt);
-            break;
-        case BRIGHTNESS_P2:
-            rc = cfg->ops->i2c_write_array(cfg->mm_snsr,
-                    &mt9v113_brightness_p2[0],
-                    ARRAY_SIZE(mt9v113_brightness_p2), dt);
-            break;
-        case BRIGHTNESS_P3:
-            rc = cfg->ops->i2c_write_array(cfg->mm_snsr,
-                    &mt9v113_brightness_p3[0],
-                    ARRAY_SIZE(mt9v113_brightness_p3), dt);
-            break;
-        case BRIGHTNESS_P4:
-            rc = cfg->ops->i2c_write_array(cfg->mm_snsr,
-                    &mt9v113_brightness_p4[0],
-                    ARRAY_SIZE(mt9v113_brightness_p4), dt);
-            break;
-        default:
-            break;
+    case BRIGHTNESS_N4:
+        return cfg->ops->i2c_write_array(cfg->mm_snsr, mt9v113_brightness_n4,
+                ARRAY_SIZE(mt9v113_brightness_n4), dt);
+    case BRIGHTNESS_N3:
+        return cfg->ops->i2c_write_array(cfg->mm_snsr, mt9v113_brightness_n3,
+                ARRAY_SIZE(mt9v113_brightness_n3), dt);
+    case BRIGHTNESS_N2:
+        return cfg->ops->i2c_write_array(cfg->mm_snsr, mt9v113_brightness_n2,
+                ARRAY_SIZE(mt9v113_brightness_n2), dt);
+    case BRIGHTNESS_N1:
+        return cfg->ops->i2c_write_array(cfg->mm_snsr, mt9v113_brightness_n1,
+                ARRAY_SIZE(mt9v113_brightness_n1), dt);
+    case BRIGHTNESS_DEFAULT:
+        return cfg->ops->i2c_write_array(cfg->mm_snsr, mt9v113_brightness_d,
+                ARRAY_SIZE(mt9v113_brightness_d), dt);
+    case BRIGHTNESS_P1:
+        return cfg->ops->i2c_write_array(cfg->mm_snsr, mt9v113_brightness_p1,
+                ARRAY_SIZE(mt9v113_brightness_p1), dt);
+    case BRIGHTNESS_P2:
+        return cfg->ops->i2c_write_array(cfg->mm_snsr, mt9v113_brightness_p2,
+                ARRAY_SIZE(mt9v113_brightness_p2), dt);
+    case BRIGHTNESS_P3:
+        return cfg->ops->i2c_write_array(cfg->mm_snsr, mt9v113_brightness_p3,
+                ARRAY_SIZE(mt9v113_brightness_p3), dt);
+    case BRIGHTNESS_P4:
+        return cfg->ops->i2c_write_array(cfg->mm_snsr, mt9v113_brightness_p4,
+                ARRAY_SIZE(mt9v113_brightness_p4), dt);
+    default:
+        break;
     }
 
-    return rc;
+    return -1;
 }
 
-static unsigned int pre_mirror_mode;
-static int mt9v113_set_ffc(mm_sensor_cfg_t *cfg,
-        enum mt9v113_ffc_mode mode)
+static int mt9v113_set_ffc(mm_sensor_cfg_t *cfg, enum mt9v113_ffc_mode mode)
 {
-    int i, rc = 0;
-    uint16_t value;
+    int i;
+    uint16_t value, size;
+    struct msm_camera_i2c_reg_array *setting;
+    struct mt9v113_pdata *pdata = (struct mt9v113_pdata *)cfg->pdata;
     enum msm_camera_i2c_data_type dt = MSM_CAMERA_I2C_WORD_DATA;
 
     switch (mode) {
-        case MIRROR:
-            rc = cfg->ops->i2c_write_array(cfg->mm_snsr,
-                    &mt9v113_ffc_mirror[0],
-                    ARRAY_SIZE(mt9v113_ffc_mirror), dt);
-            break;
-        case REVERSE:
-            rc = cfg->ops->i2c_write_array(cfg->mm_snsr,
-                    &mt9v113_ffc_reverse[0],
-                    ARRAY_SIZE(mt9v113_ffc_reverse), dt);
-            break;
-        case PORTRAIT_REVERSE:
-            rc = cfg->ops->i2c_write_array(cfg->mm_snsr,
-                    &mt9v113_ffc_portrait_reverse[0],
-                    ARRAY_SIZE(mt9v113_ffc_portrait_reverse), dt);
-            break;
-        default:
-            break;
+    case MIRROR:
+        setting = mt9v113_ffc_mirror;
+        size = ARRAY_SIZE(mt9v113_ffc_mirror);
+        break;
+    case REVERSE:
+        setting = mt9v113_ffc_reverse;
+        size = ARRAY_SIZE(mt9v113_ffc_reverse);
+        break;
+    case PORTRAIT_REVERSE:
+        setting = mt9v113_ffc_portrait_reverse;
+        size = ARRAY_SIZE(mt9v113_ffc_portrait_reverse);
+        break;
+    default:
+        return -1;
     }
-    if (rc < 0)
-        return rc;
 
-    if (pre_mirror_mode != mode) {
+    if (cfg->ops->i2c_write_array(cfg->mm_snsr, setting, size, dt) < 0)
+        return -1;
+
+    if (pdata->mirror != mode) {
         cfg->ops->i2c_write(cfg->mm_snsr, 0x098C, 0xA103, dt);
         cfg->ops->i2c_write(cfg->mm_snsr, 0x0990, 0x0006, dt);
 
@@ -840,203 +788,209 @@ static int mt9v113_set_ffc(mm_sensor_cfg_t *cfg,
         if (i == 100)
             return -1;
     }
-    pre_mirror_mode = mode;
+    pdata->mirror = mode;
 
     usleep(20000);
 
-    return rc;
+    return 0;
 }
 
 static int mt9v113_set_saturation(mm_sensor_cfg_t *cfg, int value)
 {
-    int rc;
     int mode = value/2;
+    struct mt9v113_pdata *pdata = (struct mt9v113_pdata *)cfg->pdata;
     enum msm_camera_i2c_data_type dt = MSM_CAMERA_I2C_WORD_DATA;
 
+    pdata->saturation = value;
+
+    if (pdata->mode < 0)
+        return 0;
+
     switch (mode) {
-        case SATURATION_X0:
-            rc = cfg->ops->i2c_write_array(cfg->mm_snsr,
-                    &mt9v113_saturation_x0[0],
-                    ARRAY_SIZE(mt9v113_saturation_x0), dt);
-            break;
-        case SATURATION_X05:
-            rc = cfg->ops->i2c_write_array(cfg->mm_snsr,
-                    &mt9v113_saturation_x05[0],
-                    ARRAY_SIZE(mt9v113_saturation_x05), dt);
-            break;
-        case SATURATION_X1:
-            rc = cfg->ops->i2c_write_array(cfg->mm_snsr,
-                    &mt9v113_saturation_x1[0],
-                    ARRAY_SIZE(mt9v113_saturation_x1), dt);
-            break;
-        case SATURATION_X15:
-            rc = cfg->ops->i2c_write_array(cfg->mm_snsr,
-                    &mt9v113_saturation_x15[0],
-                    ARRAY_SIZE(mt9v113_saturation_x15), dt);
-            break;
-        case SATURATION_X2:
-            rc = cfg->ops->i2c_write_array(cfg->mm_snsr,
-                    &mt9v113_saturation_x2[0],
-                    ARRAY_SIZE(mt9v113_saturation_x2), dt);
-            break;
-        default:
-            rc = -1;
-            break;
+    case SATURATION_X0:
+        return cfg->ops->i2c_write_array(cfg->mm_snsr, mt9v113_saturation_x0,
+                ARRAY_SIZE(mt9v113_saturation_x0), dt);
+    case SATURATION_X05:
+        return cfg->ops->i2c_write_array(cfg->mm_snsr, mt9v113_saturation_x05,
+                ARRAY_SIZE(mt9v113_saturation_x05), dt);
+    case SATURATION_X1:
+        return cfg->ops->i2c_write_array(cfg->mm_snsr, mt9v113_saturation_x1,
+                ARRAY_SIZE(mt9v113_saturation_x1), dt);
+    case SATURATION_X15:
+        return cfg->ops->i2c_write_array(cfg->mm_snsr, mt9v113_saturation_x15,
+                ARRAY_SIZE(mt9v113_saturation_x15), dt);
+    case SATURATION_X2:
+        return cfg->ops->i2c_write_array(cfg->mm_snsr, mt9v113_saturation_x2,
+                ARRAY_SIZE(mt9v113_saturation_x2), dt);
+    default:
+        break;
     }
 
-    return rc;
+    return -1;
 }
 
 static int mt9v113_set_contrast(mm_sensor_cfg_t *cfg, int value)
 {
-   int rc = -1;
-   int mode = value/2;
-   enum msm_camera_i2c_data_type dt = MSM_CAMERA_I2C_WORD_DATA;
+    int mode = value/2;
+    struct mt9v113_pdata *pdata = (struct mt9v113_pdata *)cfg->pdata;
+    enum msm_camera_i2c_data_type dt = MSM_CAMERA_I2C_WORD_DATA;
 
-   switch (mode) {
-       case CONTRAST_N2:
-           rc = cfg->ops->i2c_write_array(cfg->mm_snsr,
-                   &mt9v113_contrast_n2[0],
-                   ARRAY_SIZE(mt9v113_contrast_n2), dt);
-           break;
-       case CONTRAST_N1:
-           rc = cfg->ops->i2c_write_array(cfg->mm_snsr,
-                   &mt9v113_contrast_n1[0],
-                   ARRAY_SIZE(mt9v113_contrast_n1), dt);
-           break;
-       case CONTRAST_D:
-           rc = cfg->ops->i2c_write_array(cfg->mm_snsr,
-                   &mt9v113_contrast_d[0],
-                   ARRAY_SIZE(mt9v113_contrast_d), dt);
-           break;
-       case CONTRAST_P1:
-           rc = cfg->ops->i2c_write_array(cfg->mm_snsr,
-                   &mt9v113_contrast_p1[0],
-                   ARRAY_SIZE(mt9v113_contrast_p1), dt);
-           break;
-       case CONTRAST_P2:
-           rc = cfg->ops->i2c_write_array(cfg->mm_snsr,
-                   &mt9v113_contrast_p2[0],
-                   ARRAY_SIZE(mt9v113_contrast_p2), dt);
-           break;
-       default:
-           rc = -1;
-           break;
-   }
+    pdata->contrast = value;
 
-   return rc;
+    if (pdata->mode < 0)
+        return 0;
+
+    switch (mode) {
+    case CONTRAST_N2:
+        return cfg->ops->i2c_write_array(cfg->mm_snsr, mt9v113_contrast_n2,
+                ARRAY_SIZE(mt9v113_contrast_n2), dt);
+    case CONTRAST_N1:
+        return cfg->ops->i2c_write_array(cfg->mm_snsr, mt9v113_contrast_n1,
+                ARRAY_SIZE(mt9v113_contrast_n1), dt);
+    case CONTRAST_D:
+        return cfg->ops->i2c_write_array(cfg->mm_snsr, mt9v113_contrast_d,
+                ARRAY_SIZE(mt9v113_contrast_d), dt);
+    case CONTRAST_P1:
+        return cfg->ops->i2c_write_array(cfg->mm_snsr, mt9v113_contrast_p1,
+                ARRAY_SIZE(mt9v113_contrast_p1), dt);
+    case CONTRAST_P2:
+        return cfg->ops->i2c_write_array(cfg->mm_snsr, mt9v113_contrast_p2,
+                ARRAY_SIZE(mt9v113_contrast_p2), dt);
+    default:
+        break;
+    }
+
+    return -1;
 }
 
-static int pre_effect;
 static int mt9v113_set_effect(mm_sensor_cfg_t *cfg, int mode)
 {
     int i;
-    unsigned short reg_value;
-    int rc = -1;
+    uint16_t value, size;
+    struct msm_camera_i2c_reg_array *setting;
+    struct mt9v113_pdata *pdata = (struct mt9v113_pdata *)cfg->pdata;
     enum msm_camera_i2c_data_type dt = MSM_CAMERA_I2C_WORD_DATA;
 
-    if (pre_effect == mode)
+    pdata->effect = mode;
+
+    if (pdata->mode < 0)
         return 0;
+
     switch (mode) {
-        case CAM_EFFECT_MODE_OFF:
-            rc = cfg->ops->i2c_write_array(cfg->mm_snsr,
-                    &mt9v113_effect_off[0],
-                    ARRAY_SIZE(mt9v113_effect_off), dt);
-            break;
-        case CAM_EFFECT_MODE_MONO:
-            rc = cfg->ops->i2c_write_array(cfg->mm_snsr,
-                    &mt9v113_effect_mono[0],
-                    ARRAY_SIZE(mt9v113_effect_mono), dt);
-            break;
-        case CAM_EFFECT_MODE_NEGATIVE:
-            rc = cfg->ops->i2c_write_array(cfg->mm_snsr,
-                    &mt9v113_effect_negative[0],
-                    ARRAY_SIZE(mt9v113_effect_negative), dt);
-            break;
-        case CAM_EFFECT_MODE_SEPIA:
-            rc = cfg->ops->i2c_write_array(cfg->mm_snsr,
-                    &mt9v113_effect_sepia[0],
-                    ARRAY_SIZE(mt9v113_effect_sepia), dt);
-            break;
-        case CAM_EFFECT_MODE_AQUA:
-            rc = cfg->ops->i2c_write_array(cfg->mm_snsr,
-                    &mt9v113_effect_aqua[0],
-                    ARRAY_SIZE(mt9v113_effect_aqua), dt);
-            break;
-        default:
-            break;
+    case CAM_EFFECT_MODE_OFF:
+        setting = mt9v113_effect_off;
+        size = ARRAY_SIZE(mt9v113_effect_off);
+        break;
+    case CAM_EFFECT_MODE_MONO:
+        setting = mt9v113_effect_mono;
+        size = ARRAY_SIZE(mt9v113_effect_mono);
+        break;
+    case CAM_EFFECT_MODE_NEGATIVE:
+        setting = mt9v113_effect_negative;
+        size = ARRAY_SIZE(mt9v113_effect_negative);
+        break;
+    case CAM_EFFECT_MODE_SEPIA:
+        setting = mt9v113_effect_sepia;
+        size = ARRAY_SIZE(mt9v113_effect_sepia);
+        break;
+    case CAM_EFFECT_MODE_AQUA:
+        setting = mt9v113_effect_aqua;
+        size = ARRAY_SIZE(mt9v113_effect_aqua);
+        break;
+    default:
+        return -1;
     }
-    if (rc < 0)
-        return rc;
+
+    if (cfg->ops->i2c_write_array(cfg->mm_snsr, setting, size, dt) < 0)
+        return -1;
 
     for (i = 0; i < 100; i++) {
         cfg->ops->i2c_write(cfg->mm_snsr, 0x098C, 0xA103, dt);
-        cfg->ops->i2c_read(cfg->mm_snsr, 0x0990, &reg_value, dt);
-        if (reg_value == 0)
+        cfg->ops->i2c_read(cfg->mm_snsr, 0x0990, &value, dt);
+        if (value == 0)
             break;
         usleep(1000);
     }
     if (i == 100)
         return -1;
 
-    pre_effect = mode;
-
-    return rc;
+    return 0;
 }
 
 static int mt9v113_set_sharpness(mm_sensor_cfg_t *cfg, int value)
 {
-    int rc = -1;
     int mode = value/5;
+    struct mt9v113_pdata *pdata = (struct mt9v113_pdata *)cfg->pdata;
     enum msm_camera_i2c_data_type dt = MSM_CAMERA_I2C_WORD_DATA;
 
+    pdata->sharpness = value;
+
+    if (pdata->mode < 0)
+        return 0;
+
     switch (mode) {
-        case SHARPNESS_X0:
-            rc = cfg->ops->i2c_write_array(cfg->mm_snsr,
-                    &mt9v113_sharpness_x0[0],
-                    ARRAY_SIZE(mt9v113_sharpness_x0), dt);
-            break;
-        case SHARPNESS_X1:
-            rc = cfg->ops->i2c_write_array(cfg->mm_snsr,
-                    &mt9v113_sharpness_x1[0],
-                    ARRAY_SIZE(mt9v113_sharpness_x1), dt);
-            break;
-        case SHARPNESS_X2:
-            rc = cfg->ops->i2c_write_array(cfg->mm_snsr,
-                    &mt9v113_sharpness_x2[0],
-                    ARRAY_SIZE(mt9v113_sharpness_x2), dt);
-            break;
-        case SHARPNESS_X3:
-            rc = cfg->ops->i2c_write_array(cfg->mm_snsr,
-                    &mt9v113_sharpness_x3[0],
-                    ARRAY_SIZE(mt9v113_sharpness_x3), dt);
-            break;
-        case SHARPNESS_X4:
-            rc = cfg->ops->i2c_write_array(cfg->mm_snsr,
-                    &mt9v113_sharpness_x4[0],
-                    ARRAY_SIZE(mt9v113_sharpness_x4), dt);
-            break;
-        default:
-            rc = -1;
-            break;
+    case SHARPNESS_X0:
+        return cfg->ops->i2c_write_array(cfg->mm_snsr, mt9v113_sharpness_x0,
+                ARRAY_SIZE(mt9v113_sharpness_x0), dt);
+    case SHARPNESS_X1:
+        return cfg->ops->i2c_write_array(cfg->mm_snsr, mt9v113_sharpness_x1,
+                ARRAY_SIZE(mt9v113_sharpness_x1), dt);
+    case SHARPNESS_X2:
+        return cfg->ops->i2c_write_array(cfg->mm_snsr, mt9v113_sharpness_x2,
+                ARRAY_SIZE(mt9v113_sharpness_x2), dt);
+    case SHARPNESS_X3:
+        return cfg->ops->i2c_write_array(cfg->mm_snsr, mt9v113_sharpness_x3,
+                ARRAY_SIZE(mt9v113_sharpness_x3), dt);
+    case SHARPNESS_X4:
+        return cfg->ops->i2c_write_array(cfg->mm_snsr, mt9v113_sharpness_x4,
+                ARRAY_SIZE(mt9v113_sharpness_x4), dt);
+    default:
+        break;
     }
 
-    return rc;
+    return -1;
 }
 
 static int mt9v113_preview(mm_sensor_cfg_t *cfg)
 {
     int i, rc;
     uint16_t value;
+    struct mt9v113_pdata *pdata = (struct mt9v113_pdata *)cfg->pdata;
     enum msm_camera_i2c_data_type dt = MSM_CAMERA_I2C_WORD_DATA;
 
-    rc = mt9v113_set_antibanding(cfg, CAM_ANTIBANDING_MODE_AUTO);
+    pdata->mode = PREVIEW;
+
+    rc = mt9v113_set_antibanding(cfg, pdata->ab);
     if (rc < 0)
         return rc;
 
-    rc = mt9v113_set_brightness(cfg, BRIGHTNESS_DEFAULT);
+    rc = mt9v113_set_brightness(cfg, pdata->brightness);
     if (rc < 0)
         return rc;
+
+    rc = mt9v113_set_saturation(cfg, pdata->saturation);
+    if (rc < 0)
+        return rc;
+
+    rc = mt9v113_set_contrast(cfg, pdata->contrast);
+    if (rc < 0)
+        return rc;
+
+    rc = mt9v113_set_sharpness(cfg, pdata->sharpness);
+    if (rc < 0)
+        return rc;
+
+    if (pdata->effect) {
+        rc = mt9v113_set_effect(cfg, pdata->effect);
+        if (rc < 0)
+            return rc;
+    }
+
+    if (pdata->wb) {
+        rc = mt9v113_set_wb(cfg, pdata->wb);
+        if (rc < 0)
+            return rc;
+    }
 
     rc = mt9v113_set_ffc(cfg, MIRROR);
     if (rc < 0)
@@ -1068,6 +1022,10 @@ static int mt9v113_preview(mm_sensor_cfg_t *cfg)
 
 static int mt9v113_video(mm_sensor_cfg_t *cfg)
 {
+    struct mt9v113_pdata *pdata = (struct mt9v113_pdata *)cfg->pdata;
+
+    pdata->mode = VIDEO;
+
     return 0;
 }
 
@@ -1075,7 +1033,10 @@ static int mt9v113_snapshot(mm_sensor_cfg_t *cfg)
 {
     int i;
     uint16_t value;
+    struct mt9v113_pdata *pdata = (struct mt9v113_pdata *)cfg->pdata;
     enum msm_camera_i2c_data_type dt = MSM_CAMERA_I2C_WORD_DATA;
+
+    pdata->mode = SNAPSHOT;
 
     if (cfg->ops->i2c_write(cfg->mm_snsr, 0x098C, 0xA103, dt) < 0)
         return -1;
@@ -1094,11 +1055,22 @@ static int mt9v113_snapshot(mm_sensor_cfg_t *cfg)
     return 0;
 }
 
-static int mt9v113_init(mm_sensor_cfg_t *cfg)
+static int mt9v113_init_regs(mm_sensor_cfg_t *cfg)
 {
-    cfg->pdata = calloc(1, sizeof(struct mt9v113_pdata));
-    if (!cfg->pdata)
+    return 0;
+}
+
+static int mt9v113_init_data(mm_sensor_cfg_t *cfg)
+{
+    struct mt9v113_pdata *pdata = calloc(1, sizeof(struct mt9v113_pdata));
+    if (!pdata)
         return -1;
+    cfg->pdata = pdata;
+
+    pdata->mode = -1;
+    pdata->brightness = BRIGHTNESS_DEFAULT;
+    pdata->ab = CAM_ANTIBANDING_MODE_AUTO;
+
     return 0;
 }
 
@@ -1256,7 +1228,8 @@ static struct mm_sensor_data mt9v113_data = {
 };
 
 struct mm_sensor_ops mt9v113_ops = {
-    .init = mt9v113_init,
+    .init_regs = mt9v113_init_regs,
+    .init_data = mt9v113_init_data,
     .deinit = mt9v113_deinit,
     .prev = mt9v113_preview,
     .video = mt9v113_video,

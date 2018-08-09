@@ -293,9 +293,8 @@ static int imx105_exp_gain(mm_sensor_cfg_t *cfg, uint16_t gain, uint16_t line)
             {0x0104, 0x00, 0},
         };
 
-        rc = cfg->ops->i2c_write_array(cfg->mm_snsr,
-                &exp_settings[0], ARRAY_SIZE(exp_settings),
-                MSM_CAMERA_I2C_BYTE_DATA);
+        rc = cfg->ops->i2c_write_array(cfg->mm_snsr, exp_settings,
+                ARRAY_SIZE(exp_settings), MSM_CAMERA_I2C_BYTE_DATA);
     }
     pdata->line = line_val;
     pdata->again = again;
@@ -327,26 +326,30 @@ static void imx105_get_damping_params(uint16_t dest_step_pos,
     damping_params->damping_delay = sw_damping_time_wait * 500;
 }
 
-static int imx105_init(mm_sensor_cfg_t *cfg)
+static int imx105_init_regs(mm_sensor_cfg_t *cfg)
 {
     int rc = -1;
-    struct imx105_pdata *pdata;
     enum msm_camera_i2c_data_type dt = MSM_CAMERA_I2C_BYTE_DATA;
 
-    cfg->pdata = calloc(1, sizeof(struct imx105_pdata));
-    if (!cfg->pdata)
-        return -1;
-
-    rc = cfg->ops->i2c_write_array(cfg->mm_snsr, &imx105_init_settings[0],
+    rc = cfg->ops->i2c_write_array(cfg->mm_snsr, imx105_init_settings,
             ARRAY_SIZE(imx105_init_settings), dt);
 
     if (rc < 0)
         return rc;
 
-    rc = cfg->ops->i2c_write_array(cfg->mm_snsr, &imx105_act_init_settings[0],
+    rc = cfg->ops->i2c_write_array(cfg->mm_snsr, imx105_act_init_settings,
             ARRAY_SIZE(imx105_act_init_settings), dt);
 
     return rc;
+}
+
+static int imx105_init_data(mm_sensor_cfg_t *cfg)
+{
+    cfg->pdata = calloc(1, sizeof(struct imx105_pdata));
+    if (!cfg->pdata)
+        return -1;
+
+    return 0;
 }
 
 static int imx105_deinit(mm_sensor_cfg_t *cfg)
@@ -364,7 +367,7 @@ static int imx105_preview(mm_sensor_cfg_t *cfg)
 
     pdata->mode = PREVIEW;
 
-    return cfg->ops->i2c_write_array(cfg->mm_snsr, &imx105_prev_tbl[0],
+    return cfg->ops->i2c_write_array(cfg->mm_snsr, imx105_prev_tbl,
             ARRAY_SIZE(imx105_prev_tbl), MSM_CAMERA_I2C_BYTE_DATA);
 }
 
@@ -374,7 +377,7 @@ static int imx105_video(mm_sensor_cfg_t *cfg)
 
     pdata->mode = VIDEO;
 
-    return cfg->ops->i2c_write_array(cfg->mm_snsr, &imx105_video_tbl[0],
+    return cfg->ops->i2c_write_array(cfg->mm_snsr, imx105_video_tbl,
             ARRAY_SIZE(imx105_video_tbl), MSM_CAMERA_I2C_BYTE_DATA);
 }
 
@@ -384,7 +387,7 @@ static int imx105_snapshot(mm_sensor_cfg_t *cfg)
 
     pdata->mode = SNAPSHOT;
 
-    return cfg->ops->i2c_write_array(cfg->mm_snsr, &imx105_snap_tbl[0],
+    return cfg->ops->i2c_write_array(cfg->mm_snsr, imx105_snap_tbl,
             ARRAY_SIZE(imx105_snap_tbl), MSM_CAMERA_I2C_BYTE_DATA);
 }
 
@@ -441,7 +444,7 @@ static cam_capability_t imx105_capabilities = {
     .hor_view_angle = 63.1,
     .ver_view_angle = 63.1,
 
-    .preview_sizes_tbl_cnt = 9,
+    .preview_sizes_tbl_cnt = 8,
     .preview_sizes_tbl = {
         {1920, 1088},
         {1280, 720},
@@ -637,13 +640,14 @@ static struct mm_sensor_data imx105_data = {
 };
 
 static struct mm_sensor_regs imx105_stop_regs = {
-    .regs = &imx105_stop_settings[0],
+    .regs = imx105_stop_settings,
     .size = ARRAY_SIZE(imx105_stop_settings),
     .data_type = MSM_CAMERA_I2C_BYTE_DATA,
 };
 
 static struct mm_sensor_ops imx105_ops = {
-    .init = imx105_init,
+    .init_regs = imx105_init_regs,
+    .init_data = imx105_init_data,
     .deinit = imx105_deinit,
     .prev = imx105_preview,
     .video = imx105_video,

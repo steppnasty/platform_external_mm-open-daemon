@@ -25,52 +25,6 @@
 #include "mm_daemon_sensor.h"
 #include "mm_daemon_util.h"
 
-static int mm_daemon_sensor_empty_queue(mm_daemon_thread_info *info,
-        mm_daemon_sensor_t *mm_snsr, uint8_t execute);
-
-typedef struct cmd_queue {
-    mm_daemon_sensor_cmd_t cmd;
-    uint32_t val;
-    struct cmd_queue *next;
-} cmd_queue_t;
-cmd_queue_t *head = NULL;
-
-static int mm_daemon_sensor_queue_cmd(mm_daemon_sensor_cmd_t cmd,
-        uint32_t val)
-{
-    cmd_queue_t *tmp_ptr;
-
-    tmp_ptr = (cmd_queue_t *)malloc(sizeof(cmd_queue_t));
-    if (tmp_ptr == NULL)
-        return -1;
-    tmp_ptr->next = NULL;
-    tmp_ptr->cmd = val;
-    tmp_ptr->cmd = cmd;
-    tmp_ptr->next = head->next;
-    head->next = tmp_ptr;
-
-    return 0;
-}
-
-static mm_daemon_sensor_cmd_t mm_daemon_sensor_dequeue_cmd(uint32_t *val)
-{
-    mm_daemon_sensor_cmd_t cmd = 0;
-    cmd_queue_t *tmp_ptr, *temp = NULL;
-
-    tmp_ptr = head;
-    while(tmp_ptr->next != NULL) {
-        temp = tmp_ptr;
-        tmp_ptr = tmp_ptr->next;
-    }
-    if (temp) {
-        *val = tmp_ptr->val;
-        cmd = tmp_ptr->cmd;
-        free(tmp_ptr);
-        temp->next = NULL;
-    }
-    return cmd;
-}
-
 static int mm_daemon_sensor_cmd(mm_daemon_sensor_t *mm_snsr,
         int cmd, void *setting)
 {
@@ -104,26 +58,23 @@ static int mm_daemon_sensor_stop(mm_daemon_sensor_t *mm_snsr)
     if (mm_snsr->sensor_state == SENSOR_POWER_OFF ||
             mm_daemon_sensor_cmd(mm_snsr, CFG_POWER_DOWN, NULL) < 0)
         return rc;
-    if (mm_snsr->cfg->ops->deinit)
-        mm_snsr->cfg->ops->deinit(mm_snsr->cfg);
+    mm_snsr->cfg->ops->deinit(mm_snsr->cfg);
     rc = ioctl(mm_snsr->cam_fd, VIDIOC_MSM_SENSOR_RELEASE, NULL);
     mm_snsr->sensor_state = SENSOR_POWER_OFF;
     return rc;
 }
 
-static int mm_daemon_sensor_power_up(mm_daemon_thread_info *info,
-        mm_daemon_sensor_t *mm_snsr)
+static int mm_daemon_sensor_power_up(mm_daemon_sensor_t *mm_snsr)
 {
     int rc = -1;
 
     if (mm_snsr->sensor_state == SENSOR_POWER_ON)
         goto done;
     if (mm_daemon_sensor_cmd(mm_snsr, CFG_POWER_UP, NULL) == 0)
-        rc = mm_snsr->cfg->ops->init(mm_snsr->cfg);
+        rc = mm_snsr->cfg->ops->init_regs(mm_snsr->cfg);
 
     if (rc == 0) {
         mm_snsr->sensor_state = SENSOR_POWER_ON;
-        rc = mm_daemon_sensor_empty_queue(info, mm_snsr, 1);
     }
 done:
     return rc;
@@ -174,9 +125,10 @@ static int mm_daemon_sensor_i2c_write_array(void *snsr,
     return mm_daemon_sensor_cmd(mm_snsr, CFG_WRITE_I2C_ARRAY, (void *)&setting);
 }
 
-static int mm_daemon_sensor_execute_cmd(mm_daemon_thread_info *info,
-        mm_daemon_sensor_t *mm_snsr, mm_daemon_sensor_cmd_t cmd, uint32_t val)
+static int mm_daemon_sensor_read_cmd(mm_daemon_thread_info *info, uint8_t cmd,
+        uint32_t val)
 {
+    mm_daemon_sensor_t *mm_snsr = (mm_daemon_sensor_t *)info->obj;
     int rc = 0;
 
     switch (cmd) {
@@ -232,7 +184,7 @@ static int mm_daemon_sensor_execute_cmd(mm_daemon_thread_info *info,
         break;
     case SENSOR_CMD_POWER_UP:
         if (mm_snsr->sensor_state == SENSOR_POWER_OFF)
-            mm_daemon_sensor_power_up(info, mm_snsr);
+            mm_daemon_sensor_power_up(mm_snsr);
         break;
     case SENSOR_CMD_SHUTDOWN:
         rc = -1;
@@ -249,53 +201,13 @@ static void mm_daemon_sensor_shutdown(mm_daemon_thread_info *info)
 
     if (mm_snsr) {
         mm_daemon_sensor_stop(mm_snsr);
-        mm_daemon_sensor_empty_queue(info, mm_snsr, 0);
         if (mm_snsr->cam_fd) {
             close(mm_snsr->cam_fd);
             mm_snsr->cam_fd = 0;
         }
-        if (head) {
-            free(head);
-            head = NULL;
-        }
         free(info->obj);
         info->obj = NULL;
     }
-}
-
-static int mm_daemon_sensor_read_cmd(mm_daemon_thread_info *info, uint8_t cmd,
-        uint32_t val)
-{
-    mm_daemon_sensor_t *mm_snsr = (mm_daemon_sensor_t *)info->obj;
-
-    if (cmd == SENSOR_CMD_POWER_UP || cmd == SENSOR_CMD_SHUTDOWN)
-        goto execute;
-
-    if (mm_snsr->sensor_state == SENSOR_POWER_OFF) {
-        if (cmd == SENSOR_CMD_PREVIEW || cmd == SENSOR_CMD_SNAPSHOT) {
-            ALOGE("%s: Can't start stream before powerup", __FUNCTION__);
-            return -1;
-        }
-        return mm_daemon_sensor_queue_cmd(cmd, val);
-    }
-
-execute:
-    return mm_daemon_sensor_execute_cmd(info, mm_snsr, cmd, val);
-}
-
-static int mm_daemon_sensor_empty_queue(mm_daemon_thread_info *info,
-        mm_daemon_sensor_t *mm_snsr, uint8_t execute)
-{
-    mm_daemon_sensor_cmd_t cmd;
-    uint32_t val = 0;
-    int rc = 0;
-
-    do {
-        cmd = mm_daemon_sensor_dequeue_cmd(&val);
-        if (execute && cmd)
-            rc = mm_daemon_sensor_execute_cmd(info, mm_snsr, cmd, val);
-    } while(cmd && rc >= 0);
-    return rc;
 }
 
 static int mm_daemon_sensor_set_ops(mm_daemon_thread_info *info,
@@ -304,7 +216,9 @@ static int mm_daemon_sensor_set_ops(mm_daemon_thread_info *info,
     mm_snsr->cfg = (mm_sensor_cfg_t *)info->data;
     if (!mm_snsr->cfg ||
             !mm_snsr->cfg->ops ||
-            !mm_snsr->cfg->ops->init ||
+            !mm_snsr->cfg->ops->init_regs ||
+            !mm_snsr->cfg->ops->init_data ||
+            !mm_snsr->cfg->ops->deinit ||
             !mm_snsr->cfg->ops->prev ||
             !mm_snsr->cfg->ops->snap ||
             !mm_snsr->cfg->stop_regs ||
@@ -317,9 +231,10 @@ static int mm_daemon_sensor_set_ops(mm_daemon_thread_info *info,
     if (!mm_snsr->cfg->ops->i2c_write_array)
         mm_snsr->cfg->ops->i2c_write_array = &mm_daemon_sensor_i2c_write_array;
     mm_snsr->cfg->mm_snsr = (void *)mm_snsr;
+    mm_snsr->cfg->ops->init_data(mm_snsr->cfg);
     return 0;
 error:
-    ALOGE("Error loading sensor settings");
+    ALOGE("Error loading sensor ops");
     return -1;
 }
 
@@ -338,21 +253,13 @@ static int mm_daemon_sensor_init(mm_daemon_thread_info *info)
     if (mm_daemon_sensor_set_ops(info, mm_snsr) < 0)
         goto init_error;
 
-    head = (cmd_queue_t *)calloc(1, sizeof(cmd_queue_t));
-    if (!head)
-        goto init_error;
-
     if (mm_daemon_sensor_start(mm_snsr) < 0) {
         mm_daemon_sensor_stop(mm_snsr);
-        goto start_error;
+        goto init_error;
     }
     info->obj = (void *)mm_snsr;
     return 0;
-start_error:
-    if (head) {
-        free(head);
-        head = NULL;
-    }
+
 init_error:
     if (mm_snsr->cam_fd) {
         close(mm_snsr->cam_fd);
