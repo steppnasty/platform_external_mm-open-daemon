@@ -52,6 +52,7 @@ struct mm_sensor_stream_attr {
     uint16_t w;
     uint16_t blk_l;
     uint16_t blk_p;
+    float vscale;
 };
 
 struct mm_sensor_aec_config {

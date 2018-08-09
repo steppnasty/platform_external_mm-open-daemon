@@ -1097,6 +1097,7 @@ static struct mm_sensor_stream_attr mt9v113_attr = {
     .w = 640,
     .blk_l = 0,
     .blk_p = 0,
+    .vscale = 1,
 };
 
 static cam_capability_t mt9v113_capabilities = {

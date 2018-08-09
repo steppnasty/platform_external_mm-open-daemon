@@ -498,6 +498,7 @@ static struct mm_sensor_stream_attr imx105_attr_preview = {
     .w = 1640,
     .blk_l = 34,
     .blk_p = 1896,
+    .vscale = 1,
 };
 
 static struct mm_sensor_stream_attr imx105_attr_video = {
@@ -506,6 +507,7 @@ static struct mm_sensor_stream_attr imx105_attr_video = {
     .w = 3084,
     .blk_l = 110,
     .blk_p = 452,
+    .vscale = 1.5,
 };
 
 static struct mm_sensor_stream_attr imx105_attr_snapshot = {
@@ -514,6 +516,7 @@ static struct mm_sensor_stream_attr imx105_attr_snapshot = {
     .w = 3280,
     .blk_l = 70,
     .blk_p = 256,
+    .vscale = 1,
 };
 
 static struct mm_sensor_aec_config imx105_aec_cfg = {

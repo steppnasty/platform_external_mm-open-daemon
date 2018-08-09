@@ -438,6 +438,7 @@ static struct mm_sensor_stream_attr s5k4e1gx_attr_preview = {
     .w = 1304,
     .blk_l = 12,
     .blk_p = 1434,
+    .vscale = 1,
 };
 
 static struct mm_sensor_stream_attr s5k4e1gx_attr_snapshot = {
@@ -446,6 +447,7 @@ static struct mm_sensor_stream_attr s5k4e1gx_attr_snapshot = {
     .w = 2608,
     .blk_l = 27,
     .blk_p = 130,
+    .vscale = 1,
 };
 
 static struct mm_sensor_aec_config s5k4e1gx_aec_cfg = {

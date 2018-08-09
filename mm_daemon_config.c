@@ -1464,7 +1464,7 @@ static int mm_daemon_config_vfe_fov(mm_daemon_cfg_t *cfg_obj)
         reg_h = (pix_offset << 16) | (fov_h + pix_offset);
     } else if (((float)dim.height/dim.width) > ((float)sattr->h/sattr->w)) {
         reg_h -= 6;
-        fov_w = (uint32_t)(((float)dim.width/dim.height) * reg_h);
+        fov_w = (uint32_t)(((float)dim.width/dim.height) * (reg_h * sattr->vscale));
         pix_offset = (uint32_t)((float)(((int)sattr->w - 12) - fov_w)/2);
         reg_w = (pix_offset << 16) | (fov_w + pix_offset);
     }
@@ -1523,10 +1523,10 @@ static int mm_daemon_config_vfe_main_scaler(mm_daemon_cfg_t *cfg_obj)
     reg_w = sattr->w;
     if (((float)dim.height/dim.width) < ((float)sattr->h/sattr->w)) {
         reg_w -= 12;
-        reg_h = (uint16_t)((sattr->w - 12) * ((float)dim.height/dim.width));
+        reg_h = (uint16_t)(reg_w * ((float)dim.height/dim.width));
     } else if (((float)dim.height/dim.width) > ((float)sattr->h/sattr->w)) {
         reg_h -= 6;
-        reg_w = (uint16_t)((sattr->h - 6) * ((float)dim.width/dim.height));
+        reg_w = (uint16_t)(((float)reg_h * sattr->vscale) * ((float)dim.width/dim.height));
     }
 
     ms_cfg = (uint32_t *)malloc(28);
