@@ -2085,10 +2085,10 @@ static int mm_daemon_config_vfe_demux(mm_daemon_cfg_t *cfg_obj)
     p = demux_cfg;
     if (!cfg_obj->sdata->vfe_dmux_cfg || !awb_cfg) {
         *p++ = 0x3;
-        *p++ = 0x9CAC;
-        *p++ = 0x9CAC;
         *p++ = 0x800080;
-        *p = 0x800080;
+        *p++ = 0x800080;
+        *p++ = 0x9CAC;
+        *p = 0x9CAC;
     } else {
         *p++ = 0x1;
         if (!awb_cfg->dmx_wb1[wb_mode] || !awb_cfg->dmx_wb2[wb_mode]) {
