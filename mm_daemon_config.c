@@ -3092,8 +3092,9 @@ static int mm_daemon_config_sk_pkt_unmap(mm_daemon_cfg_t *cfg_obj,
         if (idx >= 0)
             buf = cfg_obj->stream_buf[idx];
         if (buf && buf->stream_info_mapped) {
-            mm_daemon_config_isp_buf_release(cfg_obj,
-                    buf->stream_info->stream_type);
+            if (buf->stream_info->stream_type != CAM_STREAM_TYPE_METADATA)
+                mm_daemon_config_isp_buf_release(cfg_obj,
+                        buf->stream_info->stream_type);
             for (buf_idx = 0; buf_idx < buf->num_stream_bufs; buf_idx++) {
                 if (buf->stream_info->stream_type ==
                         CAM_STREAM_TYPE_METADATA) {
@@ -3761,6 +3762,10 @@ static void *mm_daemon_config_thread(void *data)
 
     /* ION */
     cfg_obj->ion_fd = open("/dev/ion", O_RDONLY);
+    if (cfg_obj->ion_fd < 0) {
+        ALOGE("failed to open ion device");
+        goto thread_close;
+    }
 
     /* STATS */
     if (cfg_obj->sdata->stats_enable)
