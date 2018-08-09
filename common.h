@@ -64,7 +64,7 @@ struct mm_sensor_aec_config {
     uint16_t default_line[STREAM_TYPE_MAX];
     uint16_t line_mult;
     uint16_t frame_skip;
-    uint16_t target;
+    uint16_t target[STREAM_TYPE_MAX];
     uint16_t flash_threshold;
 };
 

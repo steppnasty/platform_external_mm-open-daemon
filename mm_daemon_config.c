@@ -3164,9 +3164,9 @@ static void mm_daemon_config_auto_exposure(mm_daemon_cfg_t *cfg_obj,
     } else
         cfg_obj->ae.frm_cnt = 0;
 
-    if (stat_val < (aec_cfg->target - 1000) ||
-            stat_val > (aec_cfg->target + 1000)) {
-        gain_adj = (int32_t)(aec_cfg->target - stat_val) / 100;
+    if (stat_val < (aec_cfg->target[mode] - 1000) ||
+            stat_val > (aec_cfg->target[mode] + 1000)) {
+        gain_adj = (int32_t)(aec_cfg->target[mode] - stat_val) / 100;
         if ((gain_adj > 0 && gain == aec_cfg->gain_max) ||
                 (gain_adj < 0 && gain == aec_cfg->gain_min) ||
                 (line != aec_cfg->default_line[mode])) {
