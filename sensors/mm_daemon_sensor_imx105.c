@@ -448,7 +448,6 @@ static cam_capability_t imx105_capabilities = {
     .preview_sizes_tbl = {
         {1920, 1088},
         {1280, 720},
-        {960, 544},
         {800, 480},
         {720, 480},
         {640, 480},
