@@ -55,7 +55,14 @@ struct mm_sensor_stream_attr {
     float vscale;
 };
 
+struct mm_sensor_aec_target {
+    uint16_t tgt;
+    uint16_t low_th;
+    uint16_t high_th;
+};
+
 struct mm_sensor_aec_config {
+    struct mm_sensor_aec_target target[STREAM_TYPE_MAX];
     uint16_t gain_min;
     uint16_t gain_max;
     uint16_t line_min;
@@ -64,7 +71,6 @@ struct mm_sensor_aec_config {
     uint16_t default_line[STREAM_TYPE_MAX];
     uint16_t line_mult;
     uint16_t frame_skip;
-    uint16_t target[STREAM_TYPE_MAX];
     uint16_t flash_threshold;
 };
 

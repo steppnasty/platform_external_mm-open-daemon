@@ -36,8 +36,7 @@
 struct imx105_pdata {
     uint8_t mode;
     uint16_t line;
-    uint16_t dgain;
-    uint16_t again;
+    uint16_t gain;
 };
 
 static uint16_t imx105_act_pos_tbl[] = {
@@ -79,10 +78,7 @@ static struct msm_camera_i2c_reg_array imx105_init_settings[] = {
 };
 
 static struct msm_camera_i2c_reg_array imx105_prev_tbl[] = {
-    {0x0100, 0x00, 0},
     {0x0104, 0x01, 0},
-    {0x0340, 0x04, 0},
-    {0x0341, 0xF2, 0},
     {0x0342, 0x0D, 0},
     {0x0343, 0xD0, 0},
     {0x0346, 0x00, 0},
@@ -121,17 +117,11 @@ static struct msm_camera_i2c_reg_array imx105_prev_tbl[] = {
     {0x316E, 0xA6, 0},
     {0x316F, 0xA5, 0},
     {0x3318, 0x72, 0},
-    {0x0202, 0x04, 0},
-    {0x0203, 0xED, 0},
     {0x0104, 0x00, 0},
-    {0x0100, 0x01, 0},
 };
 
 static struct msm_camera_i2c_reg_array imx105_video_tbl[] = {
-    {0x0100, 0x00, 0},
     {0x0104, 0x01, 0},
-    {0x0340, 0x04, 0},
-    {0x0341, 0xF2, 0},
     {0x0342, 0x0D, 0},
     {0x0343, 0xD0, 0},
     {0x0344, 0x00, 0},
@@ -174,17 +164,11 @@ static struct msm_camera_i2c_reg_array imx105_video_tbl[] = {
     {0x316E, 0xA6, 0},
     {0x316F, 0xA5, 0},
     {0x3318, 0x62, 0},
-    {0x0202, 0x04, 0},
-    {0x0203, 0xED, 0},
     {0x0104, 0x00, 0},
-    {0x0100, 0x01, 0},
 };
 
 static struct msm_camera_i2c_reg_array imx105_snap_tbl[] = {
-    {0x0100, 0x00, 0},
     {0x0104, 0x01, 0},
-    {0x0340, 0x09, 0},
-    {0x0341, 0xE6, 0},
     {0x0342, 0x0D, 0},
     {0x0343, 0xD0, 0},
     {0x0344, 0x00, 0},
@@ -227,10 +211,7 @@ static struct msm_camera_i2c_reg_array imx105_snap_tbl[] = {
     {0x316E, 0xA6, 0},
     {0x316F, 0xA5, 0},
     {0x3318, 0x62, 0},
-    {0x0202, 0x09, 0},
-    {0x0203, 0xE1, 0},
     {0x0104, 0x00, 0},
-    {0x0100, 0x01, 0},
 };
 
 static struct msm_camera_i2c_reg_array imx105_stop_settings[] = {
@@ -249,6 +230,12 @@ static struct msm_camera_i2c_reg_array imx105_act_init_settings[] = {
     {0x3405, 0x00, 0},
     {0x0104, 0x00, 0},
 };
+
+static int imx105_stream(mm_sensor_cfg_t *cfg, int start)
+{
+    return cfg->ops->i2c_write(cfg->mm_snsr, 0x100, start,
+            MSM_CAMERA_I2C_BYTE_DATA);
+}
 
 static int imx105_exp_gain(mm_sensor_cfg_t *cfg, uint16_t gain, uint16_t line)
 {
@@ -296,9 +283,8 @@ static int imx105_exp_gain(mm_sensor_cfg_t *cfg, uint16_t gain, uint16_t line)
         rc = cfg->ops->i2c_write_array(cfg->mm_snsr, exp_settings,
                 ARRAY_SIZE(exp_settings), MSM_CAMERA_I2C_BYTE_DATA);
     }
-    pdata->line = line_val;
-    pdata->again = again;
-    pdata->dgain = dgain;
+    pdata->line = line;
+    pdata->gain = gain;
     return rc;
 }
 
@@ -345,9 +331,14 @@ static int imx105_init_regs(mm_sensor_cfg_t *cfg)
 
 static int imx105_init_data(mm_sensor_cfg_t *cfg)
 {
-    cfg->pdata = calloc(1, sizeof(struct imx105_pdata));
-    if (!cfg->pdata)
+    struct imx105_pdata *pdata = calloc(1, sizeof(struct imx105_pdata));
+
+    if (!pdata)
         return -1;
+
+    cfg->pdata = pdata;
+    pdata->gain = cfg->data->aec_cfg->default_gain;
+    pdata->line = cfg->data->aec_cfg->default_line[PREVIEW];
 
     return 0;
 }
@@ -387,8 +378,16 @@ static int imx105_set_mode(mm_sensor_cfg_t *cfg, int mode)
     }
 
     pdata->mode = mode;
+    if ((rc = imx105_stream(cfg, 0)) < 0)
+        return rc;
 
-    return cfg->ops->i2c_write_array(cfg->mm_snsr, settings, size, dt);
+    if ((rc = imx105_exp_gain(cfg, pdata->gain, pdata->line)) < 0)
+        return rc;
+
+    if ((rc = cfg->ops->i2c_write_array(cfg->mm_snsr, settings, size, dt)) < 0)
+        return rc;
+
+    return imx105_stream(cfg, 1);
 }
 
 static cam_capability_t imx105_capabilities = {
@@ -519,6 +518,11 @@ static struct mm_sensor_stream_attr imx105_attr_snapshot = {
 };
 
 static struct mm_sensor_aec_config imx105_aec_cfg = {
+    .target = { 
+        { 6000, 1000, 1000 },
+        { 1750, 500, 1000 },
+        { 1750, 500, 1000 }
+    },
     .gain_min = 0,
     .gain_max = 352,
     .line_min = 190,
@@ -527,7 +531,6 @@ static struct mm_sensor_aec_config imx105_aec_cfg = {
     .default_line = { 2600, 2600, 2597 },
     .line_mult = 10,
     .frame_skip = 1,
-    .target = { 5000, 4000, 4000 },
     .flash_threshold = 224,
 };
 

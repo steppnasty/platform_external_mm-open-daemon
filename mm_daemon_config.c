@@ -2783,7 +2783,6 @@ static void mm_daemon_config_prepare_snapshot(mm_daemon_cfg_t *cfg_obj)
 
 static int mm_daemon_config_start_preview(mm_daemon_cfg_t *cfg_obj)
 {
-    struct mm_sensor_aec_config *aec_cfg = cfg_obj->sdata->aec_cfg;
     cam_stream_type_t stream_type = CAM_STREAM_TYPE_PREVIEW;
     mm_daemon_buf_info *buf = mm_daemon_get_stream_buf(cfg_obj, stream_type);
 
@@ -2796,10 +2795,6 @@ static int mm_daemon_config_start_preview(mm_daemon_cfg_t *cfg_obj)
 
     mm_daemon_util_subdev_cmd(cfg_obj->info[SNSR_DEV], SENSOR_CMD_SET_MODE,
             mm_daemon_get_sensor_mode(cfg_obj), TRUE);
-
-    if (aec_cfg)
-        mm_daemon_config_exp_gain(cfg_obj, aec_cfg->default_gain,
-                aec_cfg->default_line[PREVIEW], FALSE);
 
     mm_daemon_util_subdev_cmd(cfg_obj->info[ACT_DEV],
             ACT_CMD_INIT_FOCUS, 0, FALSE);
@@ -2850,15 +2845,10 @@ static void mm_daemon_config_stop_preview(mm_daemon_cfg_t *cfg_obj)
 
 static int mm_daemon_config_start_snapshot(mm_daemon_cfg_t *cfg_obj)
 {
-    struct mm_sensor_aec_config *aec_cfg = cfg_obj->sdata->aec_cfg;
     cam_stream_type_t stream_type = CAM_STREAM_TYPE_SNAPSHOT;
 
     mm_daemon_util_subdev_cmd(cfg_obj->info[SNSR_DEV], SENSOR_CMD_SET_MODE,
             mm_daemon_get_sensor_mode(cfg_obj), TRUE);
-
-    if (cfg_obj->prep_snapshot && aec_cfg)
-        mm_daemon_config_exp_gain(cfg_obj, aec_cfg->gain_min,
-                aec_cfg->default_line[SNAPSHOT], TRUE);
 
     mm_daemon_config_vfe_roll_off(cfg_obj);
     mm_daemon_config_vfe_fov(cfg_obj);
@@ -3127,6 +3117,9 @@ static int mm_daemon_config_sk_pkt_unmap(mm_daemon_cfg_t *cfg_obj,
 static void mm_daemon_config_auto_exposure(mm_daemon_cfg_t *cfg_obj,
         uint32_t buf_idx)
 {
+    mm_daemon_stats_buf_info *stat = cfg_obj->stats_buf[MSM_ISP_STATS_AEC];
+    enum mm_sensor_stream_type mode = mm_daemon_get_sensor_mode(cfg_obj);
+    struct mm_sensor_aec_config *aec_cfg = cfg_obj->sdata->aec_cfg;
     int i;
     int32_t led_mode;
     int32_t stat_val = 0;
@@ -3135,11 +3128,11 @@ static void mm_daemon_config_auto_exposure(mm_daemon_cfg_t *cfg_obj,
     uint16_t gain = cfg_obj->ae.c_gain;
     uint16_t line = cfg_obj->ae.c_line;
     uint16_t max_line_adj = 100;
+    uint16_t low_th = aec_cfg->target[mode].low_th;
+    uint16_t high_th = aec_cfg->target[mode].high_th;
+    uint16_t target = aec_cfg->target[mode].tgt;
     uint8_t flash_needed = FALSE;
     uint16_t work_buf[256];
-    enum mm_sensor_stream_type mode = mm_daemon_get_sensor_mode(cfg_obj);
-    struct mm_sensor_aec_config *aec_cfg = cfg_obj->sdata->aec_cfg;
-    mm_daemon_stats_buf_info *stat = cfg_obj->stats_buf[MSM_ISP_STATS_AEC];
 
     if (cfg_obj->info[SNSR_DEV]->state != STATE_POLL ||
             mm_daemon_config_get_parm(cfg_obj, CAM_INTF_PARM_AEC_LOCK) ||
@@ -3161,9 +3154,8 @@ static void mm_daemon_config_auto_exposure(mm_daemon_cfg_t *cfg_obj,
     } else
         cfg_obj->ae.frm_cnt = 0;
 
-    if (stat_val < (aec_cfg->target[mode] - 1000) ||
-            stat_val > (aec_cfg->target[mode] + 1000)) {
-        gain_adj = (int32_t)(aec_cfg->target[mode] - stat_val) / 100;
+    if (stat_val < (target - low_th) || stat_val > (target + high_th)) {
+        gain_adj = (int32_t)(target - stat_val) / 100;
         if ((gain_adj > 0 && gain == aec_cfg->gain_max) ||
                 (gain_adj < 0 && gain == aec_cfg->gain_min) ||
                 (line != aec_cfg->default_line[mode])) {
@@ -3766,6 +3758,11 @@ static void *mm_daemon_config_thread(void *data)
     /* STATS */
     if (cfg_obj->sdata->stats_enable)
         mm_daemon_config_stats_init(cfg_obj);
+
+    if (cfg_obj->sdata->aec_cfg) {
+        cfg_obj->ae.c_gain = cfg_obj->sdata->aec_cfg->default_gain;
+        cfg_obj->ae.c_line = cfg_obj->sdata->aec_cfg->default_line[PREVIEW];
+    }
 
     info->state = STATE_POLL;
     pthread_cond_signal(&cfg_obj->cfg->cond);

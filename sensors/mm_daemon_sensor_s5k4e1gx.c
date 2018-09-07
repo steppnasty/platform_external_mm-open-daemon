@@ -89,7 +89,6 @@ static struct msm_camera_i2c_reg_array s5k4e1gx_init_settings[] = {
 };
 
 static struct msm_camera_i2c_reg_array s5k4e1gx_prev_settings[] = {
-    {0x0100, 0x00, 0},/* stream stop */
     {0x034C, 0x05, 0},/* x_output size msb */
     {0x034D, 0x18, 0},/* x_output size lsb */
     {0x034E, 0x03, 0},/* y_output size msb */
@@ -111,11 +110,9 @@ static struct msm_camera_i2c_reg_array s5k4e1gx_prev_settings[] = {
     {0x3117, 0x0C, 0},/* PCLK delay */
     {0x3119, 0x0F, 0},/* V H Sync Strength */
     {0x311A, 0xFA, 0},/* Data PCLK Strength */
-    {0x0100, 0x01, 0},/* stream start */
 };
 
 static struct msm_camera_i2c_reg_array s5k4e1gx_snap_settings[] = {
-    {0x0100, 0x00, 0},
     {0x034C, 0x0A, 0},
     {0x034D, 0x30, 0},
     {0x034E, 0x07, 0},
@@ -137,7 +134,6 @@ static struct msm_camera_i2c_reg_array s5k4e1gx_snap_settings[] = {
     {0x3117, 0x0C, 0},
     {0x3119, 0x0F, 0},
     {0x311A, 0xFA, 0},
-    {0x0100, 0x01, 0},
 };
 
 static struct msm_camera_i2c_reg_array s5k4e1gx_stop_settings[] = {
@@ -190,7 +186,7 @@ static int s5k4e1gx_exp_gain(mm_sensor_cfg_t *cfg, uint16_t gain, uint16_t line)
         rc = cfg->ops->i2c_write_array(cfg->mm_snsr, exp_settings,
                 ARRAY_SIZE(exp_settings), dt);
     }
-    pdata->line = line_val;
+    pdata->line = line;
     pdata->gain = gain;
 
     return rc;
@@ -270,9 +266,13 @@ static int s5k4e1gx_init_regs(mm_sensor_cfg_t *cfg)
 
 static int s5k4e1gx_init_data(mm_sensor_cfg_t *cfg)
 {
-    cfg->pdata = calloc(1, sizeof(struct s5k4e1gx_pdata));
-    if (!cfg->pdata)
+    struct s5k4e1gx_pdata *pdata = calloc(1, sizeof(struct s5k4e1gx_pdata));
+    if (!pdata)
         return -1;
+
+    cfg->pdata = pdata;
+    pdata->gain = cfg->data->aec_cfg->default_gain;
+    pdata->line = cfg->data->aec_cfg->default_line[PREVIEW];
 
     return 0;
 }
@@ -310,7 +310,16 @@ static int s5k4e1gx_set_mode(mm_sensor_cfg_t *cfg, int mode)
 
     pdata->mode = mode;
 
-    return cfg->ops->i2c_write_array(cfg->mm_snsr, settings, size, dt);
+    if ((rc = cfg->ops->i2c_write(cfg->mm_snsr, 0x100, 0, dt)) < 0)
+        return rc;
+
+    if ((rc = cfg->ops->i2c_write_array(cfg->mm_snsr, settings, size, dt)) < 0)
+        return rc;
+
+    if ((rc = s5k4e1gx_exp_gain(cfg, pdata->gain, pdata->line)) < 0)
+        return rc;
+
+    return cfg->ops->i2c_write(cfg->mm_snsr, 0x100, 1, dt);
 }
 
 struct mm_sensor_regs s5k4e1gx_stop_regs = {
@@ -437,6 +446,11 @@ static struct mm_sensor_stream_attr s5k4e1gx_attr_snapshot = {
 };
 
 static struct mm_sensor_aec_config s5k4e1gx_aec_cfg = {
+    .target = {
+        { 4000, 1000, 1000 },
+        { 4000, 1000, 1000 },
+        { 4000, 1000, 1000 },
+    },
     .gain_min = 32,
     .gain_max = 512,
     .line_min = 50,
@@ -445,7 +459,6 @@ static struct mm_sensor_aec_config s5k4e1gx_aec_cfg = {
     .default_line = { 980, 980, 1960 },
     .line_mult = 1,
     .frame_skip = 2,
-    .target = { 4000, 4000, 4000 },
     .flash_threshold = 512,
 };
 
