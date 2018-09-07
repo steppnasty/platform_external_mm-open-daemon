@@ -361,34 +361,34 @@ static int imx105_deinit(mm_sensor_cfg_t *cfg)
     return 0;
 }
 
-static int imx105_preview(mm_sensor_cfg_t *cfg)
+static int imx105_set_mode(mm_sensor_cfg_t *cfg, int mode)
 {
     struct imx105_pdata *pdata = (struct imx105_pdata *)cfg->pdata;
+    struct msm_camera_i2c_reg_array *settings;
+    enum msm_camera_i2c_data_type dt = MSM_CAMERA_I2C_BYTE_DATA;
+    uint16_t size;
+    int rc;
 
-    pdata->mode = PREVIEW;
+    switch (mode) {
+    case PREVIEW:
+        settings = imx105_prev_tbl;
+        size = ARRAY_SIZE(imx105_prev_tbl);
+        break;
+    case VIDEO:
+        settings = imx105_video_tbl;
+        size = ARRAY_SIZE(imx105_video_tbl);
+        break;
+    case SNAPSHOT:
+        settings = imx105_snap_tbl;
+        size = ARRAY_SIZE(imx105_snap_tbl);
+        break;
+    default:
+        return -1;
+    }
 
-    return cfg->ops->i2c_write_array(cfg->mm_snsr, imx105_prev_tbl,
-            ARRAY_SIZE(imx105_prev_tbl), MSM_CAMERA_I2C_BYTE_DATA);
-}
+    pdata->mode = mode;
 
-static int imx105_video(mm_sensor_cfg_t *cfg)
-{
-    struct imx105_pdata *pdata = (struct imx105_pdata *)cfg->pdata;
-
-    pdata->mode = VIDEO;
-
-    return cfg->ops->i2c_write_array(cfg->mm_snsr, imx105_video_tbl,
-            ARRAY_SIZE(imx105_video_tbl), MSM_CAMERA_I2C_BYTE_DATA);
-}
-
-static int imx105_snapshot(mm_sensor_cfg_t *cfg)
-{
-    struct imx105_pdata *pdata = (struct imx105_pdata *)cfg->pdata;
-
-    pdata->mode = SNAPSHOT;
-
-    return cfg->ops->i2c_write_array(cfg->mm_snsr, imx105_snap_tbl,
-            ARRAY_SIZE(imx105_snap_tbl), MSM_CAMERA_I2C_BYTE_DATA);
+    return cfg->ops->i2c_write_array(cfg->mm_snsr, settings, size, dt);
 }
 
 static cam_capability_t imx105_capabilities = {
@@ -651,9 +651,7 @@ static struct mm_sensor_ops imx105_ops = {
     .init_regs = imx105_init_regs,
     .init_data = imx105_init_data,
     .deinit = imx105_deinit,
-    .prev = imx105_preview,
-    .video = imx105_video,
-    .snap = imx105_snapshot,
+    .set_mode = imx105_set_mode,
     .exp_gain = imx105_exp_gain,
 };
 

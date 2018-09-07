@@ -2794,12 +2794,8 @@ static int mm_daemon_config_start_preview(mm_daemon_cfg_t *cfg_obj)
         mm_daemon_util_subdev_cmd(cfg_obj->info[CSI_DEV],
                 CSI_CMD_CFG, 0, FALSE);
 
-    if (mm_daemon_get_sensor_mode(cfg_obj) == VIDEO)
-        mm_daemon_util_subdev_cmd(cfg_obj->info[SNSR_DEV],
-                SENSOR_CMD_VIDEO, 0, TRUE);
-    else
-        mm_daemon_util_subdev_cmd(cfg_obj->info[SNSR_DEV],
-                SENSOR_CMD_PREVIEW, 0, TRUE);
+    mm_daemon_util_subdev_cmd(cfg_obj->info[SNSR_DEV], SENSOR_CMD_SET_MODE,
+            mm_daemon_get_sensor_mode(cfg_obj), TRUE);
 
     if (aec_cfg)
         mm_daemon_config_exp_gain(cfg_obj, aec_cfg->default_gain,
@@ -2857,8 +2853,8 @@ static int mm_daemon_config_start_snapshot(mm_daemon_cfg_t *cfg_obj)
     struct mm_sensor_aec_config *aec_cfg = cfg_obj->sdata->aec_cfg;
     cam_stream_type_t stream_type = CAM_STREAM_TYPE_SNAPSHOT;
 
-    mm_daemon_util_subdev_cmd(cfg_obj->info[SNSR_DEV],
-            SENSOR_CMD_SNAPSHOT, 0, TRUE);
+    mm_daemon_util_subdev_cmd(cfg_obj->info[SNSR_DEV], SENSOR_CMD_SET_MODE,
+            mm_daemon_get_sensor_mode(cfg_obj), TRUE);
 
     if (cfg_obj->prep_snapshot && aec_cfg)
         mm_daemon_config_exp_gain(cfg_obj, aec_cfg->gain_min,

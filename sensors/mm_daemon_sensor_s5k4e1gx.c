@@ -286,46 +286,32 @@ static int s5k4e1gx_deinit(mm_sensor_cfg_t *cfg)
     return 0;
 }
 
-static int s5k4e1gx_preview(mm_sensor_cfg_t *cfg)
+static int s5k4e1gx_set_mode(mm_sensor_cfg_t *cfg, int mode)
 {
     struct s5k4e1gx_pdata *pdata = (struct s5k4e1gx_pdata *)cfg->pdata;
+    struct msm_camera_i2c_reg_array *settings;
+    enum msm_camera_i2c_data_type dt = MSM_CAMERA_I2C_BYTE_DATA;
+    uint16_t size;
+    int rc;
 
-    pdata->mode = PREVIEW;
+    switch (mode) {
+    case PREVIEW:
+    case VIDEO:
+        settings = s5k4e1gx_prev_settings;
+        size = ARRAY_SIZE(s5k4e1gx_prev_settings);
+        break;
+    case SNAPSHOT:
+        settings = s5k4e1gx_snap_settings;
+        size = ARRAY_SIZE(s5k4e1gx_snap_settings);
+        break;
+    default:
+        return -1;
+    }
 
-    return cfg->ops->i2c_write_array(cfg->mm_snsr, s5k4e1gx_prev_settings,
-            ARRAY_SIZE(s5k4e1gx_prev_settings), MSM_CAMERA_I2C_BYTE_DATA);
+    pdata->mode = mode;
+
+    return cfg->ops->i2c_write_array(cfg->mm_snsr, settings, size, dt);
 }
-
-static int s5k4e1gx_video(mm_sensor_cfg_t *cfg)
-{
-    struct s5k4e1gx_pdata *pdata = (struct s5k4e1gx_pdata *)cfg->pdata;
-
-    pdata->mode = VIDEO;
-
-    return 0;
-}
-
-static int s5k4e1gx_snapshot(mm_sensor_cfg_t *cfg)
-{
-    struct s5k4e1gx_pdata *pdata = (struct s5k4e1gx_pdata *)cfg->pdata;
-
-    pdata->mode = SNAPSHOT;
-
-    return cfg->ops->i2c_write_array(cfg->mm_snsr, s5k4e1gx_snap_settings,
-            ARRAY_SIZE(s5k4e1gx_snap_settings), MSM_CAMERA_I2C_BYTE_DATA);
-}
-
-struct mm_sensor_regs s5k4e1gx_prev_regs = {
-    .regs = s5k4e1gx_prev_settings,
-    .size = ARRAY_SIZE(s5k4e1gx_prev_settings),
-    .data_type = MSM_CAMERA_I2C_BYTE_DATA,
-};
-
-struct mm_sensor_regs s5k4e1gx_snap_regs = {
-    .regs = &s5k4e1gx_snap_settings[0],
-    .size = ARRAY_SIZE(s5k4e1gx_snap_settings),
-    .data_type = MSM_CAMERA_I2C_BYTE_DATA,
-};
 
 struct mm_sensor_regs s5k4e1gx_stop_regs = {
     .regs = &s5k4e1gx_stop_settings[0],
@@ -570,15 +556,11 @@ struct mm_sensor_ops s5k4e1gx_ops = {
     .init_regs = s5k4e1gx_init_regs,
     .init_data = s5k4e1gx_init_data,
     .deinit = s5k4e1gx_deinit,
-    .prev = s5k4e1gx_preview,
-    .video = s5k4e1gx_video,
-    .snap = s5k4e1gx_snapshot,
+    .set_mode = s5k4e1gx_set_mode,
     .exp_gain = s5k4e1gx_exp_gain,
 };
 
 mm_sensor_cfg_t sensor_cfg_obj = {
-    .prev = &s5k4e1gx_prev_regs,
-    .snap = &s5k4e1gx_snap_regs,
     .stop_regs = &s5k4e1gx_stop_regs,
     .ops = &s5k4e1gx_ops,
     .data = &s5k4e1gx_data,

@@ -132,22 +132,9 @@ static int mm_daemon_sensor_read_cmd(mm_daemon_thread_info *info, uint8_t cmd,
     int rc = 0;
 
     switch (cmd) {
-    case SENSOR_CMD_PREVIEW:
-        if ((rc = mm_snsr->cfg->ops->prev(mm_snsr->cfg)) < 0)
-            ALOGE("%s: Error while setting preview mode", __FUNCTION__);
-        break;
-    case SENSOR_CMD_VIDEO:
-        if (mm_snsr->cfg->ops->video) {
-            if ((rc = mm_snsr->cfg->ops->video(mm_snsr->cfg)) < 0)
-                ALOGE("%s: Error while setting video mode", __FUNCTION__);
-        }
-        break;
-    case SENSOR_CMD_SNAPSHOT:
-        if ((rc = mm_snsr->cfg->ops->snap(mm_snsr->cfg)) < 0)
-            ALOGE("%s: Error while setting snapshot mode", __FUNCTION__);
-        break;
-    case SENSOR_CMD_GAIN_UPDATE:
-        mm_snsr->cfg->curr_gain = val;
+    case SENSOR_CMD_SET_MODE:
+        if ((rc = mm_snsr->cfg->ops->set_mode(mm_snsr->cfg, val)) < 0)
+            ALOGE("%s: Error while setting sensor mode", __FUNCTION__);
         break;
     case SENSOR_CMD_EXP_GAIN:
         if (mm_snsr->cfg->ops->exp_gain)
@@ -219,8 +206,7 @@ static int mm_daemon_sensor_set_ops(mm_daemon_thread_info *info,
             !mm_snsr->cfg->ops->init_regs ||
             !mm_snsr->cfg->ops->init_data ||
             !mm_snsr->cfg->ops->deinit ||
-            !mm_snsr->cfg->ops->prev ||
-            !mm_snsr->cfg->ops->snap ||
+            !mm_snsr->cfg->ops->set_mode ||
             !mm_snsr->cfg->stop_regs ||
             !mm_snsr->cfg->data)
         goto error;

@@ -1055,6 +1055,22 @@ static int mt9v113_snapshot(mm_sensor_cfg_t *cfg)
     return 0;
 }
 
+static int mt9v113_set_mode(mm_sensor_cfg_t *cfg, int mode)
+{
+    struct mt9v113_pdata *pdata = (struct mt9v113_pdata *)cfg->pdata;
+
+    switch (mode) {
+    case PREVIEW:
+        return mt9v113_preview(cfg);
+    case VIDEO:
+        return mt9v113_video(cfg);
+    case SNAPSHOT:
+        return mt9v113_snapshot(cfg);
+    default:
+        return -1;
+    }
+}
+
 static int mt9v113_init_regs(mm_sensor_cfg_t *cfg)
 {
     return 0;
@@ -1080,11 +1096,6 @@ static int mt9v113_deinit(mm_sensor_cfg_t *cfg)
         free(cfg->pdata);
     return 0;
 }
-
-struct mm_sensor_regs mt9v113_snap_regs = {
-    .regs = &mt9v113_snap_settings[0],
-    .size = ARRAY_SIZE(mt9v113_snap_settings),
-};
 
 struct mm_sensor_regs mt9v113_stop_regs = {
     .regs = &mt9v113_stop_settings[0],
@@ -1232,9 +1243,7 @@ struct mm_sensor_ops mt9v113_ops = {
     .init_regs = mt9v113_init_regs,
     .init_data = mt9v113_init_data,
     .deinit = mt9v113_deinit,
-    .prev = mt9v113_preview,
-    .video = mt9v113_video,
-    .snap = mt9v113_snapshot,
+    .set_mode = mt9v113_set_mode,
     .ab = mt9v113_set_antibanding,
     .wb = mt9v113_set_wb,
     .brightness = mt9v113_set_brightness,
@@ -1245,7 +1254,6 @@ struct mm_sensor_ops mt9v113_ops = {
 };
 
 mm_sensor_cfg_t sensor_cfg_obj = {
-    .snap = &mt9v113_snap_regs,
     .stop_regs = &mt9v113_stop_regs,
     .ops = &mt9v113_ops,
     .data = &mt9v113_data,

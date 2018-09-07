@@ -44,9 +44,7 @@ struct mm_sensor_ops {
     int (*init_regs)(struct mm_sensor_cfg *cfg);
     int (*init_data)(struct mm_sensor_cfg *cfg);
     int (*deinit)(struct mm_sensor_cfg *cfg);
-    int (*prev)(struct mm_sensor_cfg *cfg);
-    int (*video)(struct mm_sensor_cfg *cfg);
-    int (*snap)(struct mm_sensor_cfg *cfg);
+    int (*set_mode)(struct mm_sensor_cfg *cfg, int mode);
     int (*ab)(struct mm_sensor_cfg *cfg, int mode);
     int (*wb)(struct mm_sensor_cfg *cfg, int mode);
     int (*brightness)(struct mm_sensor_cfg *cfg, int mode);
@@ -59,15 +57,11 @@ struct mm_sensor_ops {
 
 typedef struct mm_sensor_cfg {
     struct mm_sensor_regs *init;
-    struct mm_sensor_regs *prev;
-    struct mm_sensor_regs *video;
-    struct mm_sensor_regs *snap;
     struct mm_sensor_regs *stop_regs;
     struct mm_sensor_ops *ops;
     struct mm_sensor_data *data;
     void *pdata;
     void *mm_snsr;
-    uint16_t curr_gain;
 } mm_sensor_cfg_t;
 
 #endif
