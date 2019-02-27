@@ -2513,7 +2513,6 @@ static void mm_daemon_config_stats_stream_release(mm_daemon_cfg_t *cfg_obj,
     memset(&cmd, 0, sizeof(cmd));
     cmd.stream_handle = stat->stream_handle;
     ioctl(cfg_obj->vfe_fd, VIDIOC_MSM_ISP_RELEASE_STATS_STREAM, &cmd);
-    mm_daemon_config_subscribe(cfg_obj, ISP_EVENT_STATS_NOTIFY + stats_type, 0);
     stat->stream_handle = 0;
 }
 
@@ -3365,9 +3364,11 @@ static int mm_daemon_config_isp_evt(mm_daemon_cfg_t *cfg_obj,
 
             if (!stat)
                 break;
-            cfg_obj->stat_frames |= BIT(stats_type);
-            if (stat->ops.proc)
-                stat->ops.proc(cfg_obj, buf_idx);
+            if (BIT(stats_type) & cfg_obj->enabled_stats) {
+                cfg_obj->stat_frames |= BIT(stats_type);
+                if (stat->ops.proc)
+                    stat->ops.proc(cfg_obj, buf_idx);
+            }
             rc = mm_daemon_config_stats_buf_requeue(cfg_obj, stats_type, buf_idx);
             break;
         case ISP_EVENT_COMP_STATS_NOTIFY:
@@ -3380,6 +3381,7 @@ static int mm_daemon_config_isp_evt(mm_daemon_cfg_t *cfg_obj,
         buf_idx = mm_daemon_config_metadata_get_buf(cfg_obj);
         mm_daemon_config_isp_set_metadata(cfg_obj, isp_event, buf_idx);
         mm_daemon_config_isp_metadata_buf_done(cfg_obj, event_data, buf_idx);
+        cfg_obj->stat_frames = 0;
     }
     return rc;
 }
