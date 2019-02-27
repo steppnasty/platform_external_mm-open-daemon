@@ -20,6 +20,7 @@
    The GNU General Public License is contained in the file COPYING.
 */
 
+//#define LOG_NDEBUG 0
 #define LOG_TAG "mm-daemon-cfg"
 
 #include <sys/types.h>
@@ -2771,14 +2772,31 @@ static int mm_daemon_config_exp_gain(mm_daemon_cfg_t *cfg_obj, uint16_t gain,
     return 0;
 }
 
-static void mm_daemon_config_prepare_snapshot(mm_daemon_cfg_t *cfg_obj)
+/*==========================================================================
+ * FUNCTION   : mm_daemon_config_prepare_snapshot
+ *
+ * DESCRIPTION: Turns on LED when preparing. Turns LED off when unpreparing.
+ *
+ * PARAMETERS :
+ *   @cfg_obj:       pointer to config object
+ *   @prep_snapshot: set to 1 to prepare, 0 to unprepare
+ *==========================================================================*/
+static void mm_daemon_config_prepare_snapshot(mm_daemon_cfg_t *cfg_obj,
+        int prep_snapshot)
 {
-    if (!cfg_obj->info[LED_DEV])
+    enum msm_camera_led_config_t led;
+
+    if (!cfg_obj->info[LED_DEV] || (cfg_obj->prep_snapshot == prep_snapshot))
         return;
 
-    cfg_obj->prep_snapshot = 1;
+    if (prep_snapshot)
+        led = MSM_CAMERA_LED_LOW;
+    else
+        led = MSM_CAMERA_LED_OFF;
+
+    cfg_obj->prep_snapshot = prep_snapshot;
     mm_daemon_util_subdev_cmd(cfg_obj->info[LED_DEV],
-            LED_CMD_CONTROL, MSM_CAMERA_LED_LOW, FALSE);
+            LED_CMD_CONTROL, led, FALSE);
 }
 
 static int mm_daemon_config_start_preview(mm_daemon_cfg_t *cfg_obj)
@@ -3220,7 +3238,7 @@ static void mm_daemon_config_auto_focus_start(mm_daemon_cfg_t *cfg_obj)
 
     if (cfg_obj->ae.flash_needed || (mm_daemon_config_get_parm(cfg_obj,
             CAM_INTF_PARM_LED_MODE) == CAM_FLASH_MODE_ON))
-        mm_daemon_config_prepare_snapshot(cfg_obj);
+        mm_daemon_config_prepare_snapshot(cfg_obj, 1);
 
     if (cfg_obj->af.curr_step_pos != 0) {
         mm_daemon_util_subdev_cmd(cfg_obj->info[ACT_DEV],
@@ -3233,6 +3251,7 @@ static void mm_daemon_config_auto_focus_start(mm_daemon_cfg_t *cfg_obj)
 static void mm_daemon_config_auto_focus_stop(mm_daemon_cfg_t *cfg_obj)
 {
     mm_daemon_config_stats(cfg_obj, BIT(MSM_ISP_STATS_AF), 0);
+    mm_daemon_config_prepare_snapshot(cfg_obj, 0);
 }
 
 static void mm_daemon_config_auto_focus(mm_daemon_cfg_t *cfg_obj,
@@ -3391,6 +3410,7 @@ static int mm_daemon_config_read_pipe(mm_daemon_cfg_t *cfg_obj)
 
     read_len = read(cfg_obj->cfg->pfds[0], &pipe_cmd, sizeof(pipe_cmd));
     stream_id = pipe_cmd.val;
+    ALOGV("%s: rcvd cmd %d on pipe", __FUNCTION__, pipe_cmd.cmd);
     switch (pipe_cmd.cmd) {
     case CFG_CMD_STREAM_START:
         idx = mm_daemon_get_stream_idx(cfg_obj, stream_id);
@@ -3502,7 +3522,7 @@ static int mm_daemon_config_read_pipe(mm_daemon_cfg_t *cfg_obj)
         mm_daemon_config_auto_focus_start(cfg_obj);
         break;
     case CFG_CMD_PREPARE_SNAPSHOT:
-        mm_daemon_config_prepare_snapshot(cfg_obj);
+        mm_daemon_config_prepare_snapshot(cfg_obj, 1);
         break;
     case CFG_CMD_MAP_UNMAP_DONE:
         mm_daemon_util_pipe_cmd(cfg_obj->cfg->cb_pfd,

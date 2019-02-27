@@ -20,6 +20,7 @@
    The GNU General Public License is contained in the file COPYING.
 */
 
+//#define LOG_NDEBUG 0
 #define LOG_TAG "mm-daemon"
 
 #include <sys/types.h>
@@ -268,6 +269,7 @@ static void mm_daemon_notify(mm_daemon_sd_obj_t *sd)
             return;
         }
     }
+    ALOGV("%s: event id=%d", __FUNCTION__, __LINE__, ev.id);
     switch (ev.id) {
     case MSM_CAMERA_NEW_SESSION:
         if (mm_obj->cfg)
