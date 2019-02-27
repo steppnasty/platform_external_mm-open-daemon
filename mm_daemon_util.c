@@ -198,9 +198,11 @@ void mm_daemon_util_subdev_cmd(mm_daemon_thread_info *info, uint8_t cmd,
     pipe_cmd.wait = wait;
     pipe_cmd.cmd = cmd;
     pipe_cmd.val = val;
+
+    if (wait)
+        pthread_mutex_lock(&info->lock);
     write(info->pfds[1], &pipe_cmd, sizeof(pipe_cmd));
     if (wait) {
-        pthread_mutex_lock(&info->lock);
         pthread_cond_wait(&info->cond, &info->lock);
         pthread_mutex_unlock(&info->lock);
     }
